@@ -1,0 +1,21 @@
+{
+  "entities": {
+    "restaurant_menu": {
+      "title": "Restaurant Menu & Settings",
+      "description": "Global restaurant menu configuration, categories, and items synchronized across all customer devices",
+      "type": "object",
+      "properties": {
+        "categories": { "type": "array", "description": "List of categories" },
+        "items": { "type": "array", "description": "List of menu items" },
+        "orderPhoneNumber": { "type": "string", "description": "Contact phone number for orders" },
+        "updatedAt": { "type": "string", "description": "Last update timestamp" }
+      }
+    }
+  },
+  "firestore": {
+    "/menu_config/main": {
+      "entity": "restaurant_menu",
+      "description": "The shared singleton document containing public menu data and contact info"
+    }
+  }
+}

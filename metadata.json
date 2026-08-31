@@ -1,0 +1,6 @@
+{
+  "name": "منوی رستوران مینیمال",
+  "description": "منوی دیجیتال رستوران با تم دارک مود مینیمال، فونت وزیرمتن و دسته‌بندی صبحانه، ایرانی و فست‌فود",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
