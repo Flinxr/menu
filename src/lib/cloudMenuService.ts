@@ -103,6 +103,9 @@ export function setLocalCachedMenu(data: CloudMenuPayload): void {
  */
 export async function fetchMenuFromCloud(): Promise<CloudMenuPayload | null> {
   const { pantryId } = getCustomStorageConfig();
+  const cached = getLocalCachedMenu();
+
+  let fetchedPayload: CloudMenuPayload | null = null;
 
   // 1. Pantry Cloud (Free, Zero-binding REST storage, 100% unblocked)
   if (pantryId) {
@@ -119,53 +122,96 @@ export async function fetchMenuFromCloud(): Promise<CloudMenuPayload | null> {
       });
       if (res.ok) {
         const data = await res.json();
-        const payload: CloudMenuPayload = {
-          categories: Array.isArray(data.categories) ? data.categories : [],
-          items: Array.isArray(data.items) ? data.items : [],
-          orderPhoneNumber: typeof data.orderPhoneNumber === 'string' ? data.orderPhoneNumber : '09900674112',
-          updatedAt: data.updatedAt,
-        };
-        setLocalCachedMenu(payload);
-        return payload;
+        if (data && (Array.isArray(data.items) || Array.isArray(data.categories))) {
+          fetchedPayload = {
+            categories: Array.isArray(data.categories) ? data.categories : [],
+            items: Array.isArray(data.items) ? data.items : [],
+            orderPhoneNumber: typeof data.orderPhoneNumber === 'string' ? data.orderPhoneNumber : '09900674112',
+            updatedAt: data.updatedAt || new Date().toISOString(),
+          };
+        }
       }
     } catch (e) {
-      console.warn('Pantry fetch failed, falling back:', e);
+      console.warn('Pantry fetch failed:', e);
     }
   }
 
-  // 2. Local/Hosted Server API (/api/menu) if running
-  try {
-    const response = await fetch('/api/menu', {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-      },
-    });
+  // 2. Local/Hosted Server API (/api/menu) if running and pantry didn't return
+  if (!fetchedPayload) {
+    try {
+      const response = await fetch('/api/menu', {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+        },
+      });
 
-    if (response.ok) {
-      const data = await response.json();
-      const payload: CloudMenuPayload = {
-        categories: Array.isArray(data.categories) ? data.categories : [],
-        items: Array.isArray(data.items) ? data.items : [],
-        orderPhoneNumber: typeof data.orderPhoneNumber === 'string' ? data.orderPhoneNumber : '09900674112',
-        updatedAt: data.updatedAt,
-      };
-
-      setLocalCachedMenu(payload);
-      return payload;
+      if (response.ok) {
+        const data = await response.json();
+        if (data && (Array.isArray(data.items) || Array.isArray(data.categories))) {
+          fetchedPayload = {
+            categories: Array.isArray(data.categories) ? data.categories : [],
+            items: Array.isArray(data.items) ? data.items : [],
+            orderPhoneNumber: typeof data.orderPhoneNumber === 'string' ? data.orderPhoneNumber : '09900674112',
+            updatedAt: data.updatedAt || new Date().toISOString(),
+          };
+        }
+      }
+    } catch {
+      // Expected on pure static host
     }
-  } catch {
-    // Expected on pure static host
+  }
+
+  // If we fetched new data from remote, verify against local cache timestamp
+  if (fetchedPayload) {
+    if (cached && cached.updatedAt && fetchedPayload.updatedAt) {
+      const localTime = new Date(cached.updatedAt).getTime();
+      const remoteTime = new Date(fetchedPayload.updatedAt).getTime();
+      // If local cache is newer (within 1 minute) due to recent local edit/delete, preserve local
+      if (localTime > remoteTime) {
+        return cached;
+      }
+    }
+    setLocalCachedMenu(fetchedPayload);
+    return fetchedPayload;
   }
 
   // 3. LocalStorage Fallback
-  const cached = getLocalCachedMenu();
   if (cached) {
     return cached;
   }
 
   return null;
+}
+
+/**
+ * Helper to post to Pantry with retry on 429
+ */
+async function postToPantry(pantryId: string, payload: CloudMenuPayload, retries = 2): Promise<boolean> {
+  const pantryUrl = `https://getpantry.cloud/apiv1/pantry/${pantryId}/basket/menu_database`;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(pantryUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        return true;
+      }
+      if (res.status === 429 && attempt < retries) {
+        await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
+        continue;
+      }
+    } catch (e) {
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, 800));
+        continue;
+      }
+    }
+  }
+  return false;
 }
 
 /**
@@ -187,18 +233,9 @@ export async function saveMenuToCloud(payload: Partial<CloudMenuPayload>): Promi
 
   const savePromises: Promise<any>[] = [];
 
-  // 1. Save to Pantry Cloud if configured (POST completely replaces basket contents)
+  // 1. Save to Pantry Cloud if configured
   if (pantryId) {
-    const pantryUrl = `https://getpantry.cloud/apiv1/pantry/${pantryId}/basket/menu_database`;
-    savePromises.push(
-      fetch(pantryUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedPayload),
-      }).catch((e) => {
-        console.warn('Pantry save error:', e);
-      })
-    );
+    savePromises.push(postToPantry(pantryId, updatedPayload));
   }
 
   // 2. Save to Server Database (/api/menu) if backend server is running
@@ -209,14 +246,7 @@ export async function saveMenuToCloud(payload: Partial<CloudMenuPayload>): Promi
       body: JSON.stringify(updatedPayload),
     })
       .then((res) => (res.ok ? res.json() : null))
-      .then((result) => {
-        if (result && result.categories && result.items) {
-          setLocalCachedMenu(result);
-        }
-      })
-      .catch(() => {
-        // Expected on static web environments (Cloudflare Pages, Vercel, etc.)
-      })
+      .catch(() => {})
   );
 
   await Promise.allSettled(savePromises);

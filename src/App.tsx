@@ -97,26 +97,32 @@ export default function App() {
       }
     );
 
-    // Periodic refresh and on window focus (guarantees cross-device / cross-IP sync even on sleeping tabs or Cloudflare proxy)
+    // Refresh on window focus / visibility change with debounce
+    let lastRefreshTime = Date.now();
     const handleFocus = () => {
-      refreshFromCloud(false);
+      const now = Date.now();
+      if (now - lastRefreshTime > 20000) {
+        lastRefreshTime = now;
+        refreshFromCloud(false);
+      }
     };
 
     window.addEventListener('focus', handleFocus);
-    window.addEventListener('visibilitychange', () => {
+    const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        refreshFromCloud(false);
+        const now = Date.now();
+        if (now - lastRefreshTime > 20000) {
+          lastRefreshTime = now;
+          refreshFromCloud(false);
+        }
       }
-    });
-
-    const intervalId = setInterval(() => {
-      refreshFromCloud(false);
-    }, 15000);
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       unsubscribe();
       window.removeEventListener('focus', handleFocus);
-      clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [refreshFromCloud]);
 
