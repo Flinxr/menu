@@ -176,47 +176,50 @@ export async function saveMenuToCloud(payload: Partial<CloudMenuPayload>): Promi
   const current = getLocalCachedMenu();
 
   const updatedPayload: CloudMenuPayload = {
-    categories: payload.categories || current?.categories || [],
-    items: payload.items || current?.items || [],
-    orderPhoneNumber: payload.orderPhoneNumber || current?.orderPhoneNumber || '09900674112',
+    categories: payload.categories !== undefined ? payload.categories : (current?.categories || []),
+    items: payload.items !== undefined ? payload.items : (current?.items || []),
+    orderPhoneNumber: payload.orderPhoneNumber !== undefined ? payload.orderPhoneNumber : (current?.orderPhoneNumber || '09900674112'),
     updatedAt: new Date().toISOString(),
   };
 
   // Always update local cache immediately for instant UI responsiveness
   setLocalCachedMenu(updatedPayload);
 
-  // 1. Save to Pantry Cloud if configured
+  const savePromises: Promise<any>[] = [];
+
+  // 1. Save to Pantry Cloud if configured (POST completely replaces basket contents)
   if (pantryId) {
-    try {
-      const pantryUrl = `https://getpantry.cloud/apiv1/pantry/${pantryId}/basket/menu_database`;
-      const res = await fetch(pantryUrl, {
+    const pantryUrl = `https://getpantry.cloud/apiv1/pantry/${pantryId}/basket/menu_database`;
+    savePromises.push(
+      fetch(pantryUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedPayload),
-      });
-      if (res.ok) return;
-    } catch (e) {
-      console.warn('Pantry save failed:', e);
-    }
+      }).catch((e) => {
+        console.warn('Pantry save error:', e);
+      })
+    );
   }
 
-  // 2. Save to Server Database (/api/menu) if available
-  try {
-    const response = await fetch('/api/menu', {
+  // 2. Save to Server Database (/api/menu) if backend server is running
+  savePromises.push(
+    fetch('/api/menu', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedPayload),
-    });
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((result) => {
+        if (result && result.categories && result.items) {
+          setLocalCachedMenu(result);
+        }
+      })
+      .catch(() => {
+        // Expected on static web environments (Cloudflare Pages, Vercel, etc.)
+      })
+  );
 
-    if (response.ok) {
-      const result = await response.json();
-      if (result && result.categories && result.items) {
-        setLocalCachedMenu(result);
-      }
-    }
-  } catch {
-    // Saved to local client cache
-  }
+  await Promise.allSettled(savePromises);
 }
 
 /**
@@ -225,36 +228,38 @@ export async function saveMenuToCloud(payload: Partial<CloudMenuPayload>): Promi
 export async function resetMenuOnCloud(): Promise<CloudMenuPayload> {
   const { pantryId } = getCustomStorageConfig();
 
-  // Try server reset
-  try {
-    const response = await fetch('/api/menu/reset', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      const payload: CloudMenuPayload = {
-        categories: Array.isArray(data.categories) ? data.categories : [],
-        items: Array.isArray(data.items) ? data.items : [],
-        orderPhoneNumber: typeof data.orderPhoneNumber === 'string' ? data.orderPhoneNumber : '09900674112',
-        updatedAt: data.updatedAt,
-      };
-      setLocalCachedMenu(payload);
-      return payload;
-    }
-  } catch {
-    // Fallback for static host
-  }
-
-  // Reset local cache
   const defaultData: CloudMenuPayload = {
     categories: [],
     items: [],
     orderPhoneNumber: '09900674112',
     updatedAt: new Date().toISOString(),
   };
+
   setLocalCachedMenu(defaultData);
+
+  const promises: Promise<any>[] = [];
+
+  if (pantryId) {
+    const pantryUrl = `https://getpantry.cloud/apiv1/pantry/${pantryId}/basket/menu_database`;
+    promises.push(
+      fetch(pantryUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(defaultData),
+      }).catch((e) => console.warn('Pantry reset error:', e))
+    );
+  }
+
+  promises.push(
+    fetch('/api/menu/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .catch(() => {})
+  );
+
+  await Promise.allSettled(promises);
   return defaultData;
 }
 

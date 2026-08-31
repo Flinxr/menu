@@ -78,13 +78,13 @@ export default function App() {
     // Initial fetch on mount for all devices and IPs
     refreshFromCloud(true);
 
-    // Subscribe to Firestore realtime updates
+    // Subscribe to realtime updates
     const unsubscribe = subscribeToCloudMenu(
       (data: CloudMenuPayload) => {
-        if (data.categories && Array.isArray(data.categories) && data.categories.length > 0) {
+        if (data.categories && Array.isArray(data.categories)) {
           setCategories(data.categories);
         }
-        if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+        if (data.items && Array.isArray(data.items)) {
           setMenuItems(data.items);
         }
         if (data.orderPhoneNumber) {
@@ -177,7 +177,7 @@ export default function App() {
     }
     setIsSyncing(true);
     try {
-      await saveMenuToCloud({ items: updated });
+      await saveMenuToCloud({ items: updated, categories, orderPhoneNumber });
       showToast('تغییرات با موفقیت در دیتابیس ذخیره و سراسری شد');
     } catch (err) {
       console.error('Error saving items to database:', err);
@@ -191,7 +191,7 @@ export default function App() {
     setCategories(updated);
     setIsSyncing(true);
     try {
-      await saveMenuToCloud({ categories: updated });
+      await saveMenuToCloud({ categories: updated, items: menuItems, orderPhoneNumber });
       showToast('دسته‌بندی‌ها در دیتابیس ذخیره شدند');
     } catch (err) {
       console.error('Error saving categories to database:', err);
@@ -205,7 +205,7 @@ export default function App() {
     setOrderPhoneNumber(newPhone);
     setIsSyncing(true);
     try {
-      await saveMenuToCloud({ orderPhoneNumber: newPhone });
+      await saveMenuToCloud({ orderPhoneNumber: newPhone, categories, items: menuItems });
       showToast('شماره تماس در دیتابیس ذخیره و در تمام دیوایس‌ها همگام شد');
     } catch (err) {
       console.error('Error saving phone to database:', err);

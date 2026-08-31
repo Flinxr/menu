@@ -4,8 +4,6 @@ import { MenuIcon } from './MenuIcon';
 import { formatPrice, toPersianDigits } from '../utils/formatters';
 import { 
   getCustomStorageConfig, 
-  setCustomStorageConfig,
-  sanitizePantryId,
   saveMenuToCloud
 } from '../lib/cloudMenuService';
 import { 
@@ -120,10 +118,6 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Zero-binding remote storage configuration (Pantry / REST)
-  const initialStorageConfig = getCustomStorageConfig();
-  const [pantryIdInput, setPantryIdInput] = useState(initialStorageConfig.pantryId);
-
   if (!isOpen) return null;
 
   const showNotice = (msg: string) => {
@@ -131,36 +125,17 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     setTimeout(() => setFeedbackNotice(null), 3500);
   };
 
-  const handleSaveStorageConfig = async () => {
-    const cleanId = sanitizePantryId(pantryIdInput);
-    setPantryIdInput(cleanId);
-    setCustomStorageConfig({
-      pantryId: cleanId,
-    });
-    if (cleanId) {
-      try {
-        await saveMenuToCloud({ categories, items, orderPhoneNumber });
-        showNotice('شناسه Pantry ذخیره شد و منو با موفقیت روی دیتابیس ابری همگام گردید.');
-      } catch {
-        showNotice('شناسه Pantry با موفقیت ذخیره شد.');
-      }
-    } else {
-      showNotice('تنظیمات به حالت حافظه محلی ذخیره شد.');
-    }
-  };
-
   const handleTestPantryConnection = async () => {
-    const cleanId = sanitizePantryId(pantryIdInput);
-    if (!cleanId) {
-      alert('لطفاً ابتدا شناسه Pantry ID را در کادر مربوطه وارد کنید.');
+    const { pantryId } = getCustomStorageConfig();
+    if (!pantryId) {
+      alert('شناسه دیتابیس در فایل کانفیگ یافت نشد.');
       return;
     }
-    setPantryIdInput(cleanId);
     setPingStatus({ latency: null, status: 'testing' });
     const startTime = performance.now();
     try {
       // 1. Try checking the Pantry account details (GET /apiv1/pantry/{pantry_id})
-      const pantryAccountUrl = `https://getpantry.cloud/apiv1/pantry/${cleanId}`;
+      const pantryAccountUrl = `https://getpantry.cloud/apiv1/pantry/${pantryId}`;
       const res = await fetch(pantryAccountUrl, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
@@ -169,32 +144,31 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
       const ms = Math.round(endTime - startTime);
 
       if (res.ok) {
-        // ID is valid! Automatically seed the basket so it's ready
+        // ID is valid! Automatically seed/sync the basket so it's ready
         await saveMenuToCloud({ categories, items, orderPhoneNumber });
         setPingStatus({ latency: ms, status: 'success' });
-        showNotice(`اتصال به Pantry با موفقیت برقرار شد (${toPersianDigits(ms)} میلی‌ثانیه). منو همگام شد.`);
+        showNotice(`اتصال به دیتابیس Pantry با موفقیت تأیید شد (${toPersianDigits(ms)} میلی‌ثانیه). منو همگام است.`);
         return;
       }
 
       // 2. If account details endpoint returned 400/404, check basket endpoint directly
-      const basketUrl = `https://getpantry.cloud/apiv1/pantry/${cleanId}/basket/menu_database`;
+      const basketUrl = `https://getpantry.cloud/apiv1/pantry/${pantryId}/basket/menu_database`;
       const basketRes = await fetch(basketUrl, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
       });
 
       if (basketRes.ok || basketRes.status === 400 || basketRes.status === 404) {
-        // The server was reached and responded (basket may just need creation)
         await saveMenuToCloud({ categories, items, orderPhoneNumber });
         const endMs = Math.round(performance.now() - startTime);
         setPingStatus({ latency: endMs, status: 'success' });
         showNotice(`اتصال با دیتابیس ابری Pantry تأیید شد (${toPersianDigits(endMs)} میلی‌ثانیه)!`);
       } else {
         setPingStatus({ latency: null, status: 'error' });
-        showNotice(`پاسخ از سرور دریافت نشد (کد ${basketRes.status}). لطفاً از صحت شناسه کپی‌شده مطمئن شوید.`);
+        showNotice(`پاسخ از سرور دریافت نشد (کد ${basketRes.status}).`);
       }
     } catch {
-      // 3. Fallback write attempt in case of strict CORS on GET
+      // 3. Fallback write attempt
       try {
         await saveMenuToCloud({ categories, items, orderPhoneNumber });
         const endMs = Math.round(performance.now() - startTime);
@@ -1130,81 +1104,29 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-bold text-[#faf7ee] flex items-center gap-2">
                     <Cloud className="w-4 h-4 text-[#70b5ff]" />
-                    <span>دیتابیس ابری Pantry.cloud</span>
+                    <span>دیتابیس ابری سراسری (Pantry Cloud)</span>
                   </h3>
-                  {pantryIdInput.trim() ? (
-                    <span className="px-2 py-0.5 rounded-full bg-[#172d1f] text-[#7ce075] border border-[#235332] text-[10px] font-bold flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#7ce075] animate-pulse"></span>
-                      پیکربندی شده
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 rounded-full bg-[#2a2214] text-[#e5a93b] border border-[#4d3a1b] text-[10px] font-bold">
-                      ذخیره محلی (آفلاین)
-                    </span>
-                  )}
+                  <span className="px-2.5 py-1 rounded-full bg-[#172d1f] text-[#7ce075] border border-[#235332] text-[10px] font-bold flex items-center gap-1.5 shadow-sm">
+                    <span className="w-2 h-2 rounded-full bg-[#7ce075] animate-pulse"></span>
+                    فعال و متصل سراسری
+                  </span>
                 </div>
 
                 <p className="text-xs text-[#a6a092] leading-relaxed">
-                  سرویس <strong>Pantry</strong> یک دیتابیس ابری کاملاً رایگان بر بستر REST API است که در تمام اینترنت‌های ایران <strong>۱۰۰٪ بدون فیلترشکن</strong> کار می‌کند و نیازی به هیچ‌گونه سرور، بایندینگ یا تنظیمات کلودفلر ندارد.
+                  دیتابیس ابری برای تمام مشتریان، دستگاه‌ها و مرورگرها فعال است. تمام تغییرات (افزودن، ویرایش و حذف غذاها، دسته‌بندی‌ها و شماره تماس) به صورت آنی و خودکار روی سرور ابری همگام‌سازی می‌شوند.
                 </p>
 
-                {/* Step-by-step help */}
-                <div className="bg-[#191924] border border-[#262638] rounded-xl p-3 text-[11px] text-[#cfcac0] space-y-1.5">
-                  <div className="font-bold text-[#70b5ff] flex items-center justify-between">
-                    <span>راهنمای دریافت و اتصال دائمی دیتابیس Pantry:</span>
-                    <a
-                      href="https://getpantry.cloud"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[#70b5ff] hover:underline flex items-center gap-1"
-                    >
-                      <span>ورود به سایت getpantry.cloud</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
-                  <ol className="list-decimal list-inside space-y-1 text-[#a6a092] pr-1 leading-relaxed">
-                    <li>وارد سایت <span className="text-[#faf7ee] font-mono">getpantry.cloud</span> شوید و با ایمیل خود ثبت‌نام کنید.</li>
-                    <li>شناسه <span className="text-[#faf7ee] font-bold">Pantry ID</span> خود را در کادر زیر قرار داده و «ذخیره و اتصال دیتابیس» را بزنید.</li>
-                    <li><strong>برای اتصال دائمی تمام مشتریان و بیلدها:</strong> کافیست همین شناسه را داخل فایل <code className="bg-[#242433] px-1 py-0.5 rounded text-[#faf7ee] font-mono" dir="ltr">src/data/pantryConfig.ts</code> در متغیر <code className="bg-[#242433] px-1 py-0.5 rounded text-[#7ce075] font-mono" dir="ltr">DEFAULT_PANTRY_ID</code> قرار دهید تا تمام مشتریان بدون نیاز به هیچ تنظیمی خودکار متصل شوند!</li>
-                  </ol>
-                </div>
-
-                {/* Input & Action Buttons */}
-                <div className="space-y-2 pt-1">
-                  <label className="text-[11px] font-bold text-[#faf7ee] block">
-                    شناسه Pantry ID:
-                  </label>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <input
-                      type="text"
-                      value={pantryIdInput}
-                      onChange={(e) => setPantryIdInput(e.target.value)}
-                      placeholder="مثال: a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-                      className="flex-1 bg-[#1b1b26] border border-[#2e2e40] focus:border-[#70b5ff] rounded-xl py-2.5 px-3 text-xs text-[#faf7ee] placeholder-[#6e685c] focus:outline-none transition-all font-mono text-left"
-                      dir="ltr"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleSaveStorageConfig}
-                      className="px-4 py-2.5 rounded-xl bg-[#1b263b] hover:bg-[#253754] text-[#70b5ff] font-bold text-xs border border-[#2b446a] transition-colors flex items-center justify-center gap-1.5"
-                    >
-                      <Save className="w-3.5 h-3.5" />
-                      <span>ذخیره و اتصال دیتابیس</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Test Connection Button */}
+                {/* Test Connection Button & Status */}
                 <div className="pt-2 border-t border-[#232332] flex flex-col sm:flex-row items-center justify-between gap-2.5">
                   <div className="text-xs text-[#8e897e] flex items-center gap-1.5">
                     <Database className="w-3.5 h-3.5 text-[#70b5ff]" />
-                    <span>وضعیت اتصال: {pantryIdInput.trim() ? <span className="text-[#7ce075]">متصل به Pantry Cloud</span> : <span className="text-[#e5a93b]">حالت آفلاین محلی</span>}</span>
+                    <span>وضعیت دیتابیس: <span className="text-[#7ce075] font-bold">همگام‌سازی زنده ابری فعال</span></span>
                   </div>
                   <button
                     type="button"
                     onClick={handleTestPantryConnection}
-                    disabled={pingStatus.status === 'testing' || !pantryIdInput.trim()}
-                    className="w-full sm:w-auto px-3.5 py-1.5 rounded-xl bg-[#1a2333] hover:bg-[#23324a] text-[#70b5ff] text-xs font-bold border border-[#2d4263] transition-colors flex items-center justify-center gap-1.5 disabled:opacity-40"
+                    disabled={pingStatus.status === 'testing'}
+                    className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-[#1a2333] hover:bg-[#23324a] text-[#70b5ff] text-xs font-bold border border-[#2d4263] transition-colors flex items-center justify-center gap-1.5 disabled:opacity-40"
                   >
                     <Activity className={`w-3.5 h-3.5 ${pingStatus.status === 'testing' ? 'animate-spin' : ''}`} />
                     <span>
@@ -1212,7 +1134,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                         ? 'در حال سنجش اتصال...'
                         : pingStatus.latency !== null
                         ? `تست مجدد اتصال (${toPersianDigits(pingStatus.latency)} میلی‌ثانیه)`
-                        : 'تست برقراری ارتباط با Pantry'}
+                        : 'تست برقراری ارتباط با دیتابیس'}
                     </span>
                   </button>
                 </div>
