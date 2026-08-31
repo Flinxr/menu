@@ -1151,7 +1151,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 {/* Step-by-step help */}
                 <div className="bg-[#191924] border border-[#262638] rounded-xl p-3 text-[11px] text-[#cfcac0] space-y-1.5">
                   <div className="font-bold text-[#70b5ff] flex items-center justify-between">
-                    <span>راهنمای دریافت شناسه Pantry ID در ۳۰ ثانیه:</span>
+                    <span>راهنمای دریافت و اتصال دائمی دیتابیس Pantry:</span>
                     <a
                       href="https://getpantry.cloud"
                       target="_blank"
@@ -1163,9 +1163,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     </a>
                   </div>
                   <ol className="list-decimal list-inside space-y-1 text-[#a6a092] pr-1 leading-relaxed">
-                    <li>وارد سایت <span className="text-[#faf7ee] font-mono">getpantry.cloud</span> شوید و با ایمیل خود ثبت‌نام رایگان کنید.</li>
-                    <li>شناسه <span className="text-[#faf7ee] font-bold">Pantry ID</span> اختصاصی خود را کپی کرده و در کادر زیر قرار دهید.</li>
-                    <li>روی دکمه «ذخیره و اتصال دیتابیس» کلیک کنید. تغییرات منو از این پس به‌صورت زنده برای همه ذخیره می‌شود.</li>
+                    <li>وارد سایت <span className="text-[#faf7ee] font-mono">getpantry.cloud</span> شوید و با ایمیل خود ثبت‌نام کنید.</li>
+                    <li>شناسه <span className="text-[#faf7ee] font-bold">Pantry ID</span> خود را در کادر زیر قرار داده و «ذخیره و اتصال دیتابیس» را بزنید.</li>
+                    <li><strong>برای اتصال دائمی تمام مشتریان و بیلدها:</strong> کافیست همین شناسه را داخل فایل <code className="bg-[#242433] px-1 py-0.5 rounded text-[#faf7ee] font-mono" dir="ltr">src/data/pantryConfig.ts</code> در متغیر <code className="bg-[#242433] px-1 py-0.5 rounded text-[#7ce075] font-mono" dir="ltr">DEFAULT_PANTRY_ID</code> قرار دهید تا تمام مشتریان بدون نیاز به هیچ تنظیمی خودکار متصل شوند!</li>
                   </ol>
                 </div>
 

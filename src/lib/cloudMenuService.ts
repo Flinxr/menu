@@ -1,4 +1,5 @@
 import { CategoryInfo, MenuItem } from '../types';
+import { DEFAULT_PANTRY_ID } from '../data/pantryConfig';
 
 export interface CloudMenuPayload {
   categories: CategoryInfo[];
@@ -23,12 +24,35 @@ export function sanitizePantryId(input: string): string {
   return cleaned.replace(/^['"\s/]+|['"\s/]+$/g, '').trim();
 }
 
-// Helper to get Pantry storage configuration
+// Helper to get Pantry storage configuration (from localStorage, URL param, or hardcoded DEFAULT_PANTRY_ID)
 export function getCustomStorageConfig(): { pantryId: string } {
-  if (typeof window === 'undefined') return { pantryId: '' };
+  if (typeof window === 'undefined') return { pantryId: sanitizePantryId(DEFAULT_PANTRY_ID) };
+  
+  // 1. Check if URL has ?pantry=... (useful for QR codes or instant setup on any device)
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const queryPantry = urlParams.get('pantry') || urlParams.get('pantryId');
+    if (queryPantry) {
+      const sanitized = sanitizePantryId(queryPantry);
+      if (sanitized) {
+        localStorage.setItem(PANTRY_ID_KEY, sanitized);
+        return { pantryId: sanitized };
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  // 2. Check localStorage
   const raw = localStorage.getItem(PANTRY_ID_KEY) || '';
+  const sanitized = sanitizePantryId(raw);
+  if (sanitized) {
+    return { pantryId: sanitized };
+  }
+
+  // 3. Fallback to global DEFAULT_PANTRY_ID if defined in code
   return {
-    pantryId: sanitizePantryId(raw),
+    pantryId: sanitizePantryId(DEFAULT_PANTRY_ID),
   };
 }
 
@@ -86,7 +110,12 @@ export async function fetchMenuFromCloud(): Promise<CloudMenuPayload | null> {
       const pantryUrl = `https://getpantry.cloud/apiv1/pantry/${pantryId}/basket/menu_database`;
       const res = await fetch(pantryUrl, {
         method: 'GET',
-        headers: { 'Accept': 'application/json' },
+        cache: 'no-store',
+        headers: { 
+          'Accept': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        },
       });
       if (res.ok) {
         const data = await res.json();
