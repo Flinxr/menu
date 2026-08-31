@@ -4,7 +4,9 @@ import { MenuIcon } from './MenuIcon';
 import { formatPrice, toPersianDigits } from '../utils/formatters';
 import { 
   getCustomStorageConfig, 
-  setCustomStorageConfig 
+  setCustomStorageConfig,
+  sanitizePantryId,
+  saveMenuToCloud
 } from '../lib/cloudMenuService';
 import { 
   X, 
@@ -129,42 +131,79 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     setTimeout(() => setFeedbackNotice(null), 3500);
   };
 
-  const handleSaveStorageConfig = () => {
+  const handleSaveStorageConfig = async () => {
+    const cleanId = sanitizePantryId(pantryIdInput);
+    setPantryIdInput(cleanId);
     setCustomStorageConfig({
-      pantryId: pantryIdInput.trim(),
+      pantryId: cleanId,
     });
-    showNotice('شناسه Pantry با موفقیت ذخیره شد');
+    if (cleanId) {
+      try {
+        await saveMenuToCloud({ categories, items, orderPhoneNumber });
+        showNotice('شناسه Pantry ذخیره شد و منو با موفقیت روی دیتابیس ابری همگام گردید.');
+      } catch {
+        showNotice('شناسه Pantry با موفقیت ذخیره شد.');
+      }
+    } else {
+      showNotice('تنظیمات به حالت حافظه محلی ذخیره شد.');
+    }
   };
 
   const handleTestPantryConnection = async () => {
-    if (!pantryIdInput.trim()) {
+    const cleanId = sanitizePantryId(pantryIdInput);
+    if (!cleanId) {
       alert('لطفاً ابتدا شناسه Pantry ID را در کادر مربوطه وارد کنید.');
       return;
     }
+    setPantryIdInput(cleanId);
     setPingStatus({ latency: null, status: 'testing' });
     const startTime = performance.now();
     try {
-      const pantryUrl = `https://getpantry.cloud/apiv1/pantry/${pantryIdInput.trim()}/basket/menu_database`;
-      const res = await fetch(pantryUrl, {
+      // 1. Try checking the Pantry account details (GET /apiv1/pantry/{pantry_id})
+      const pantryAccountUrl = `https://getpantry.cloud/apiv1/pantry/${cleanId}`;
+      const res = await fetch(pantryAccountUrl, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
       });
       const endTime = performance.now();
       const ms = Math.round(endTime - startTime);
+
       if (res.ok) {
+        // ID is valid! Automatically seed the basket so it's ready
+        await saveMenuToCloud({ categories, items, orderPhoneNumber });
         setPingStatus({ latency: ms, status: 'success' });
-        showNotice(`اتصال به دیتابیس Pantry در ${toPersianDigits(ms)} میلی‌ثانیه با موفقیت تأیید شد!`);
-      } else if (res.status === 404) {
-        // Basket not created yet - it is still valid pantry ID
-        setPingStatus({ latency: ms, status: 'success' });
-        showNotice('شناسه Pantry معتبر است. با اولین ویرایش منو، سبد دیتابیس خودکار ایجاد می‌شود.');
+        showNotice(`اتصال به Pantry با موفقیت برقرار شد (${toPersianDigits(ms)} میلی‌ثانیه). منو همگام شد.`);
+        return;
+      }
+
+      // 2. If account details endpoint returned 400/404, check basket endpoint directly
+      const basketUrl = `https://getpantry.cloud/apiv1/pantry/${cleanId}/basket/menu_database`;
+      const basketRes = await fetch(basketUrl, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+      });
+
+      if (basketRes.ok || basketRes.status === 400 || basketRes.status === 404) {
+        // The server was reached and responded (basket may just need creation)
+        await saveMenuToCloud({ categories, items, orderPhoneNumber });
+        const endMs = Math.round(performance.now() - startTime);
+        setPingStatus({ latency: endMs, status: 'success' });
+        showNotice(`اتصال با دیتابیس ابری Pantry تأیید شد (${toPersianDigits(endMs)} میلی‌ثانیه)!`);
       } else {
         setPingStatus({ latency: null, status: 'error' });
-        showNotice('خطا در اتصال: لطفاً از صحت شناسه Pantry ID اطمینان حاصل کنید.');
+        showNotice(`پاسخ از سرور دریافت نشد (کد ${basketRes.status}). لطفاً از صحت شناسه کپی‌شده مطمئن شوید.`);
       }
     } catch {
-      setPingStatus({ latency: null, status: 'error' });
-      showNotice('خطا در اتصال به getpantry.cloud');
+      // 3. Fallback write attempt in case of strict CORS on GET
+      try {
+        await saveMenuToCloud({ categories, items, orderPhoneNumber });
+        const endMs = Math.round(performance.now() - startTime);
+        setPingStatus({ latency: endMs, status: 'success' });
+        showNotice(`اتصال با دیتابیس Pantry برقرار شد (${toPersianDigits(endMs)} میلی‌ثانیه)!`);
+      } catch {
+        setPingStatus({ latency: null, status: 'error' });
+        showNotice('خطا در اتصال به سرور Pantry. لطفاً اینترنت خود را بررسی کنید.');
+      }
     }
   };
 
@@ -1091,7 +1130,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-bold text-[#faf7ee] flex items-center gap-2">
                     <Cloud className="w-4 h-4 text-[#70b5ff]" />
-                    <span>دیتابیس ابری Pantry.cloud (بدون تحریم و بدون نیاز به بایندینگ کلودفلر)</span>
+                    <span>دیتابیس ابری Pantry.cloud</span>
                   </h3>
                   {pantryIdInput.trim() ? (
                     <span className="px-2 py-0.5 rounded-full bg-[#172d1f] text-[#7ce075] border border-[#235332] text-[10px] font-bold flex items-center gap-1">

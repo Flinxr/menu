@@ -10,19 +10,34 @@ export interface CloudMenuPayload {
 const LOCAL_STORAGE_CACHE_KEY = 'digital_menu_cached_data_v3';
 const PANTRY_ID_KEY = 'digital_menu_pantry_id';
 
+/**
+ * Sanitizes any raw input (extracts UUID even if full URL is pasted)
+ */
+export function sanitizePantryId(input: string): string {
+  if (!input) return '';
+  let cleaned = input.trim();
+  const match = cleaned.match(/pantry\/([a-zA-Z0-9_-]+)/i);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+  return cleaned.replace(/^['"\s/]+|['"\s/]+$/g, '').trim();
+}
+
 // Helper to get Pantry storage configuration
 export function getCustomStorageConfig(): { pantryId: string } {
   if (typeof window === 'undefined') return { pantryId: '' };
+  const raw = localStorage.getItem(PANTRY_ID_KEY) || '';
   return {
-    pantryId: localStorage.getItem(PANTRY_ID_KEY) || '',
+    pantryId: sanitizePantryId(raw),
   };
 }
 
 export function setCustomStorageConfig(config: { pantryId?: string }): void {
   if (typeof window === 'undefined') return;
   if (config.pantryId !== undefined) {
-    if (config.pantryId.trim()) {
-      localStorage.setItem(PANTRY_ID_KEY, config.pantryId.trim());
+    const cleaned = sanitizePantryId(config.pantryId);
+    if (cleaned) {
+      localStorage.setItem(PANTRY_ID_KEY, cleaned);
     } else {
       localStorage.removeItem(PANTRY_ID_KEY);
     }
