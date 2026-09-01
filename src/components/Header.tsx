@@ -89,18 +89,27 @@ export const Header: React.FC<HeaderProps> = ({
             title="نگه‌داشتن روی آیکون: ورود به پنل مدیریت"
           >
             {/* Logo box */}
-            <div className="relative w-9 h-9 rounded-xl bg-[#16161c] border border-[#272732] flex items-center justify-center text-[#e8dfc8] shadow-inner overflow-hidden flex-shrink-0">
+            <div className="relative w-10 h-10 rounded-xl bg-[#16161c] border border-[#d8c59a]/40 flex items-center justify-center text-[#e8dfc8] shadow-md overflow-hidden flex-shrink-0">
+              <img
+                src="/logo.jpg"
+                alt="لوگو کافه رستوران نیک"
+                className={`w-full h-full object-cover transition-transform ${
+                  isPressing ? 'scale-110' : ''
+                }`}
+                referrerPolicy="no-referrer"
+              />
+
               {isPressing && (
                 <div
-                  className="absolute inset-0 bg-[#d8c59a]/30 pointer-events-none"
+                  className="absolute inset-0 bg-[#d8c59a]/40 pointer-events-none"
                   style={{ height: `${pressProgress}%`, bottom: 0, top: 'auto', width: '100%' }}
                 />
               )}
-              
-              {isAdminLoggedIn ? (
-                <ShieldCheck className="w-4 h-4 text-[#7ce075] z-10" />
-              ) : (
-                <Utensils className={`w-4 h-4 z-10 transition-transform ${isPressing ? 'scale-110' : ''}`} />
+
+              {isAdminLoggedIn && (
+                <div className="absolute top-0.5 right-0.5 w-3 h-3 bg-[#7ce075] rounded-full border border-[#16161c] flex items-center justify-center z-10">
+                  <ShieldCheck className="w-2.5 h-2.5 text-[#0f1f14]" />
+                </div>
               )}
 
               {isPressing && (
@@ -110,7 +119,7 @@ export const Header: React.FC<HeaderProps> = ({
                     cy="18"
                     r="15"
                     stroke="#e8dfc8"
-                    strokeWidth="2"
+                    strokeWidth="2.5"
                     fill="none"
                     strokeDasharray={95}
                     strokeDashoffset={95 - (95 * pressProgress) / 100}
@@ -123,30 +132,29 @@ export const Header: React.FC<HeaderProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-base font-bold text-[#faf7ee] tracking-tight">
-                  منوی رستوران
+                  کافه رستوران نیک
                 </h1>
                 {isAdminLoggedIn && (
                   <span className="inline-flex items-center gap-1 px-2 py-0.2 rounded-md text-[10px] font-medium bg-[#1c2e22] text-[#7ce075] border border-[#2c5436]">
-                    پنل مدیریت
+                    مدیریت
                   </span>
                 )}
               </div>
-              {isPressing && (
-                <span className="text-[10px] text-[#e8dfc8] block animate-pulse">
-                  در حال باز کردن مدیریت...
-                </span>
-              )}
+              <p className="text-[10px] text-[#9e988c] font-normal leading-none mt-0.5">
+                {isPressing ? 'در حال باز کردن مدیریت...' : 'منوی دیجیتال آنلاین'}
+              </p>
             </div>
           </div>
 
-          {/* Share Button */}
+          {/* Share & Add to Home Screen Button */}
           <button
             id="header-share-btn"
             onClick={onShareMenu}
-            className="p-2 rounded-xl bg-[#15151a] border border-[#262630] text-[#9e988c] hover:text-[#faf7ee] hover:border-[#3d3d4d] transition-colors"
-            title="اشتراک‌گذاری منو"
+            className="flex items-center gap-1.5 py-1.5 px-2.5 rounded-xl bg-[#181820] hover:bg-[#22222c] border border-[#2e2e3c] hover:border-[#424255] text-[#d8cfb8] transition-all shadow-sm group"
+            title="نصب اپلیکیشن و اشتراک‌گذاری"
           >
-            <Share2 className="w-3.5 h-3.5" />
+            <Share2 className="w-3.5 h-3.5 text-[#e8dfc8] group-hover:scale-110 transition-transform" />
+            <span className="text-[11px] font-medium hidden sm:inline">نصب اپ / اشتراک</span>
           </button>
         </div>
 

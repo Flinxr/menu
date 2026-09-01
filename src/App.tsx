@@ -20,6 +20,7 @@ import { MenuItemCard } from './components/MenuItemCard';
 import { ItemDetailModal } from './components/ItemDetailModal';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
+import { ShareModal } from './components/ShareModal';
 import { MenuIcon } from './components/MenuIcon';
 import { toPersianDigits } from './utils/formatters';
 import { 
@@ -158,6 +159,7 @@ export default function App() {
   });
   const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [editingItemInAdmin, setEditingItemInAdmin] = useState<MenuItem | null>(null);
 
   // Dynamic section refs for categories
@@ -352,20 +354,9 @@ export default function App() {
     }
   };
 
-  // ---------------- Share Action ----------------
+  // ---------------- Share & Add to Home Screen Action ----------------
   const handleShareMenu = () => {
-    if (navigator.share) {
-      navigator
-        .share({
-          title: 'منوی دیجیتال رستوران',
-          text: 'منوی آنلاین غذاها و مشخصات کامل ترکیبات',
-          url: window.location.href,
-        })
-        .catch(() => {});
-    } else {
-      navigator.clipboard.writeText(window.location.href);
-      showToast('لینک منو در کلیپ‌بورد کپی شد');
-    }
+    setIsShareModalOpen(true);
   };
 
   // ---------------- Category Selection & Scroll ----------------
@@ -705,6 +696,13 @@ export default function App() {
         onResetToDefault={handleResetToDefault}
         onLogout={handleAdminLogout}
         initialEditingItem={editingItemInAdmin}
+      />
+
+      {/* Share & Add to Home Screen Modal */}
+      <ShareModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        restaurantName="کافه رستوران نیک"
       />
     </div>
   );

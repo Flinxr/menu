@@ -25,7 +25,7 @@ export function generateOrderText(
 ): string {
   const total = items.reduce((acc, curr) => acc + curr.item.price * curr.quantity, 0);
   
-  let text = `📋 سفارش منوی رستوران\n`;
+  let text = `📋 سفارش کافه رستوران نیک\n`;
   if (tableNumber) {
     text += `📍 شماره میز: ${toPersianDigits(tableNumber)}\n`;
   }
