@@ -44,6 +44,14 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [cloudError, setCloudError] = useState<string | null>(null);
 
+  // Synchronized refs to avoid any stale closures during rapid or concurrent updates
+  const categoriesRef = useRef<CategoryInfo[]>(categories);
+  categoriesRef.current = categories;
+  const menuItemsRef = useRef<MenuItem[]>(menuItems);
+  menuItemsRef.current = menuItems;
+  const orderPhoneRef = useRef<string>(orderPhoneNumber);
+  orderPhoneRef.current = orderPhoneNumber;
+
   // ---------------- Cloud Database Realtime Sync & Hydration ----------------
   const refreshFromCloud = useCallback(async (isInitial = false) => {
     if (isInitial) setIsLoading(true);
@@ -53,11 +61,14 @@ export default function App() {
       if (cloudData && (cloudData.items.length > 0 || cloudData.categories.length > 0)) {
         setCategories(cloudData.categories);
         setMenuItems(cloudData.items);
+        categoriesRef.current = cloudData.categories;
+        menuItemsRef.current = cloudData.items;
         if (cloudData.orderPhoneNumber) {
           setOrderPhoneNumber(cloudData.orderPhoneNumber);
+          orderPhoneRef.current = cloudData.orderPhoneNumber;
         }
       } else {
-        // If database is completely empty on first deploy, initialize it with default items directly into Cloud Firestore
+        // If database is completely empty on first deploy, initialize it with default items
         await saveMenuToCloud({
           categories: INITIAL_CATEGORIES,
           items: INITIAL_MENU_ITEMS,
@@ -66,6 +77,9 @@ export default function App() {
         setCategories(INITIAL_CATEGORIES);
         setMenuItems(INITIAL_MENU_ITEMS);
         setOrderPhoneNumber('09900674112');
+        categoriesRef.current = INITIAL_CATEGORIES;
+        menuItemsRef.current = INITIAL_MENU_ITEMS;
+        orderPhoneRef.current = '09900674112';
       }
     } catch (err: any) {
       console.error('Failed to sync menu with server database:', err);
@@ -161,7 +175,7 @@ export default function App() {
     }, 2500);
   };
 
-  // ---------------- Admin Actions ----------------
+  // ---------------- Admin Atomic Actions ----------------
   const handleAdminLoginSuccess = () => {
     setIsAdminLoggedIn(true);
     setIsAdminLoginOpen(false);
@@ -176,33 +190,129 @@ export default function App() {
     showToast('از حساب مدیریت خارج شدید');
   };
 
-  const handleUpdateItems = async (updated: MenuItem[]) => {
-    setMenuItems(updated);
-    if (selectedDetailItem) {
-      const fresh = updated.find((i) => i.id === selectedDetailItem.id);
-      setSelectedDetailItem(fresh || null);
+  // Atomic Item Save (Add or Edit)
+  const handleSaveItem = async (item: MenuItem, isNew: boolean) => {
+    let nextItems: MenuItem[];
+    if (isNew) {
+      nextItems = [item, ...menuItemsRef.current.filter((i) => i.id !== item.id)];
+    } else {
+      nextItems = menuItemsRef.current.map((i) => (i.id === item.id ? item : i));
+    }
+    setMenuItems(nextItems);
+    menuItemsRef.current = nextItems;
+    if (selectedDetailItem && selectedDetailItem.id === item.id) {
+      setSelectedDetailItem(item);
     }
     setIsSyncing(true);
     try {
-      await saveMenuToCloud({ items: updated, categories, orderPhoneNumber });
-      showToast('تغییرات با موفقیت در دیتابیس ذخیره و سراسری شد');
+      await saveMenuToCloud({
+        categories: categoriesRef.current,
+        items: nextItems,
+        orderPhoneNumber: orderPhoneRef.current,
+      });
+      showToast(isNew ? `غذای «${item.name}» افزوده و در دیتابیس ذخیره شد` : `مشخصات «${item.name}» در دیتابیس ذخیره شد`);
     } catch (err) {
-      console.error('Error saving items to database:', err);
+      console.error('Error saving item to database:', err);
       showToast('خطا در ذخیره دیتابیس. لطفاً اتصال را بررسی کنید');
     } finally {
       setIsSyncing(false);
     }
   };
 
-  const handleUpdateCategories = async (updated: CategoryInfo[]) => {
-    setCategories(updated);
+  // Atomic Item Delete
+  const handleDeleteItem = async (itemId: string, itemName: string) => {
+    const nextItems = menuItemsRef.current.filter((i) => i.id !== itemId);
+    setMenuItems(nextItems);
+    menuItemsRef.current = nextItems;
+    if (selectedDetailItem && selectedDetailItem.id === itemId) {
+      setSelectedDetailItem(null);
+    }
     setIsSyncing(true);
     try {
-      await saveMenuToCloud({ categories: updated, items: menuItems, orderPhoneNumber });
-      showToast('دسته‌بندی‌ها در دیتابیس ذخیره شدند');
+      await saveMenuToCloud({
+        categories: categoriesRef.current,
+        items: nextItems,
+        orderPhoneNumber: orderPhoneRef.current,
+      });
+      showToast(`آیتم «${itemName}» از دیتابیس به صورت کامل حذف شد`);
     } catch (err) {
-      console.error('Error saving categories to database:', err);
-      showToast('خطا در ذخیره اطلاعات');
+      console.error('Error deleting item from database:', err);
+      showToast('خطا در حذف آیتم از دیتابیس');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Atomic Category Save (Add or Edit)
+  const handleSaveCategory = async (category: CategoryInfo, isNew: boolean) => {
+    let nextCategories: CategoryInfo[];
+    if (isNew) {
+      nextCategories = [...categoriesRef.current.filter((c) => c.id !== category.id), category];
+    } else {
+      nextCategories = categoriesRef.current.map((c) => (c.id === category.id ? category : c));
+    }
+    setCategories(nextCategories);
+    categoriesRef.current = nextCategories;
+    setIsSyncing(true);
+    try {
+      await saveMenuToCloud({
+        categories: nextCategories,
+        items: menuItemsRef.current,
+        orderPhoneNumber: orderPhoneRef.current,
+      });
+      showToast(isNew ? `دسته‌بندی «${category.title}» ذخیره شد` : `مشخصات دسته‌بندی «${category.title}» ذخیره شد`);
+    } catch (err) {
+      console.error('Error saving category to database:', err);
+      showToast('خطا در ذخیره دسته‌بندی');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Atomic Category Delete (Cascade deletes items in that category in a single transaction)
+  const handleDeleteCategory = async (catId: string, catTitle: string) => {
+    const nextCategories = categoriesRef.current.filter((c) => c.id !== catId);
+    const nextItems = menuItemsRef.current.filter((i) => i.categoryId !== catId);
+    setCategories(nextCategories);
+    setMenuItems(nextItems);
+    categoriesRef.current = nextCategories;
+    menuItemsRef.current = nextItems;
+    if (selectedDetailItem && selectedDetailItem.categoryId === catId) {
+      setSelectedDetailItem(null);
+    }
+    setIsSyncing(true);
+    try {
+      await saveMenuToCloud({
+        categories: nextCategories,
+        items: nextItems,
+        orderPhoneNumber: orderPhoneRef.current,
+      });
+      showToast(`دسته‌بندی «${catTitle}» و تمام غذاهای آن از دیتابیس حذف شدند`);
+    } catch (err) {
+      console.error('Error deleting category from database:', err);
+      showToast('خطا در حذف دسته‌بندی');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Atomic All-Menu Save (for backups / imports)
+  const handleSaveAllMenu = async (payload: CloudMenuPayload) => {
+    setCategories(payload.categories);
+    setMenuItems(payload.items);
+    categoriesRef.current = payload.categories;
+    menuItemsRef.current = payload.items;
+    if (payload.orderPhoneNumber) {
+      setOrderPhoneNumber(payload.orderPhoneNumber);
+      orderPhoneRef.current = payload.orderPhoneNumber;
+    }
+    setIsSyncing(true);
+    try {
+      await saveMenuToCloud(payload);
+      showToast('منو با موفقیت در دیتابیس بارگذاری و ذخیره شد');
+    } catch (err) {
+      console.error('Error importing menu:', err);
+      showToast('خطا در بارگذاری اطلاعات منو');
     } finally {
       setIsSyncing(false);
     }
@@ -210,9 +320,10 @@ export default function App() {
 
   const handleUpdateOrderPhone = async (newPhone: string) => {
     setOrderPhoneNumber(newPhone);
+    orderPhoneRef.current = newPhone;
     setIsSyncing(true);
     try {
-      await saveMenuToCloud({ orderPhoneNumber: newPhone, categories, items: menuItems });
+      await saveMenuToCloud({ orderPhoneNumber: newPhone, categories: categoriesRef.current, items: menuItemsRef.current });
       showToast('شماره تماس در دیتابیس ذخیره و در تمام دیوایس‌ها همگام شد');
     } catch (err) {
       console.error('Error saving phone to database:', err);
@@ -229,7 +340,10 @@ export default function App() {
       setCategories(resetData.categories);
       setMenuItems(resetData.items);
       setOrderPhoneNumber(resetData.orderPhoneNumber);
-      showToast('منو در دیتابیس به حالت اولیه بازگردانده شد');
+      categoriesRef.current = resetData.categories;
+      menuItemsRef.current = resetData.items;
+      orderPhoneRef.current = resetData.orderPhoneNumber;
+      showToast('منو در دیتابیس به حالت اولیه کارخانه بازگردانده شد');
     } catch (err) {
       console.error('Error resetting menu on database:', err);
       showToast('خطا در بازنشانی دیتابیس');
@@ -582,8 +696,11 @@ export default function App() {
         categories={categories}
         items={menuItems}
         orderPhoneNumber={orderPhoneNumber}
-        onUpdateCategories={handleUpdateCategories}
-        onUpdateItems={handleUpdateItems}
+        onSaveCategory={handleSaveCategory}
+        onDeleteCategory={handleDeleteCategory}
+        onSaveItem={handleSaveItem}
+        onDeleteItem={handleDeleteItem}
+        onSaveAllMenu={handleSaveAllMenu}
         onUpdateOrderPhone={handleUpdateOrderPhone}
         onResetToDefault={handleResetToDefault}
         onLogout={handleAdminLogout}

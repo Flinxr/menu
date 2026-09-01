@@ -97,15 +97,44 @@ export function setLocalCachedMenu(data: CloudMenuPayload): void {
 }
 
 /**
- * Fetch menu data from Pantry.cloud or server API:
- * 1. Pantry.cloud basket (realtime cloud database)
- * 2. Hosted Server API (/api/menu)
+ * Fetch menu data from database:
+ * 1. Hosted Server API (/api/menu) - Authoritative Primary Source
+ * 2. Pantry.cloud basket (realtime cloud fallback)
  * 3. Local cached data (offline fallback)
  */
 export async function fetchMenuFromCloud(): Promise<CloudMenuPayload | null> {
   const { pantryId } = getCustomStorageConfig();
 
-  // 1. Pantry Cloud (Free, Zero-binding REST storage, 100% unblocked)
+  // 1. Primary Source of Truth: Hosted Server API (/api/menu)
+  try {
+    const response = await fetch('/api/menu', {
+      method: 'GET',
+      cache: 'no-store',
+      headers: {
+        'Accept': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+      },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data && (Array.isArray(data.items) || Array.isArray(data.categories))) {
+        const payload: CloudMenuPayload = {
+          categories: Array.isArray(data.categories) ? data.categories : [],
+          items: Array.isArray(data.items) ? data.items : [],
+          orderPhoneNumber: typeof data.orderPhoneNumber === 'string' ? data.orderPhoneNumber : '09900674112',
+          updatedAt: data.updatedAt || new Date().toISOString(),
+        };
+        setLocalCachedMenu(payload);
+        return payload;
+      }
+    }
+  } catch {
+    // Proceed to fallback
+  }
+
+  // 2. Secondary Fallback: Pantry Cloud
   if (pantryId) {
     try {
       const pantryUrl = `https://getpantry.cloud/apiv1/pantry/${pantryId}/basket/menu_database`;
@@ -132,35 +161,8 @@ export async function fetchMenuFromCloud(): Promise<CloudMenuPayload | null> {
         }
       }
     } catch (e) {
-      console.warn('Pantry fetch failed, checking server endpoint:', e);
+      console.warn('Pantry fallback fetch note:', e);
     }
-  }
-
-  // 2. Local/Hosted Server API (/api/menu)
-  try {
-    const response = await fetch('/api/menu', {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-      },
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data && (Array.isArray(data.items) || Array.isArray(data.categories))) {
-        const payload: CloudMenuPayload = {
-          categories: Array.isArray(data.categories) ? data.categories : [],
-          items: Array.isArray(data.items) ? data.items : [],
-          orderPhoneNumber: typeof data.orderPhoneNumber === 'string' ? data.orderPhoneNumber : '09900674112',
-          updatedAt: data.updatedAt || new Date().toISOString(),
-        };
-        setLocalCachedMenu(payload);
-        return payload;
-      }
-    }
-  } catch {
-    // Static host fallback
   }
 
   // 3. LocalStorage Fallback
@@ -175,7 +177,7 @@ export async function fetchMenuFromCloud(): Promise<CloudMenuPayload | null> {
 /**
  * Helper to post to Pantry with retry
  */
-async function postToPantry(pantryId: string, payload: CloudMenuPayload, retries = 2): Promise<boolean> {
+async function postToPantry(pantryId: string, payload: CloudMenuPayload, retries = 1): Promise<boolean> {
   const pantryUrl = `https://getpantry.cloud/apiv1/pantry/${pantryId}/basket/menu_database`;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -187,24 +189,17 @@ async function postToPantry(pantryId: string, payload: CloudMenuPayload, retries
       if (res.ok) {
         return true;
       }
-      if (res.status === 429 && attempt < retries) {
-        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
-        continue;
-      }
-    } catch (e) {
-      if (attempt < retries) {
-        await new Promise((r) => setTimeout(r, 600));
-        continue;
-      }
+    } catch {
+      // ignore
     }
   }
   return false;
 }
 
 /**
- * Saves entire menu or updates fields to Pantry.cloud & server & local cache.
+ * Saves entire menu or updates fields to Server Database & local cache & Pantry.cloud.
  */
-export async function saveMenuToCloud(payload: Partial<CloudMenuPayload>): Promise<void> {
+export async function saveMenuToCloud(payload: Partial<CloudMenuPayload>): Promise<CloudMenuPayload> {
   const { pantryId } = getCustomStorageConfig();
   const current = getLocalCachedMenu();
 
@@ -215,28 +210,52 @@ export async function saveMenuToCloud(payload: Partial<CloudMenuPayload>): Promi
     updatedAt: new Date().toISOString(),
   };
 
-  // Always update local cache immediately
+  // 1. Update local cache immediately
   setLocalCachedMenu(updatedPayload);
 
-  const savePromises: Promise<any>[] = [];
-
-  // 1. Save to Pantry Cloud
-  if (pantryId) {
-    savePromises.push(postToPantry(pantryId, updatedPayload));
-  }
-
-  // 2. Save to Server Database (/api/menu)
-  savePromises.push(
-    fetch('/api/menu', {
+  // 2. Save directly to Authoritative Server Database (/api/menu)
+  try {
+    await fetch('/api/menu', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedPayload),
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .catch(() => {})
-  );
+    });
+  } catch (e) {
+    console.warn('Direct server save note:', e);
+  }
 
-  await Promise.allSettled(savePromises);
+  // 3. Sync to Pantry Cloud in the background
+  if (pantryId) {
+    postToPantry(pantryId, updatedPayload).catch(() => {});
+  }
+
+  return updatedPayload;
+}
+
+/**
+ * Delete a single item on the cloud server
+ */
+export async function deleteItemOnCloud(itemId: string): Promise<void> {
+  try {
+    await fetch(`/api/menu/items/${encodeURIComponent(itemId)}`, {
+      method: 'DELETE',
+    });
+  } catch (e) {
+    console.warn('Server item delete endpoint note:', e);
+  }
+}
+
+/**
+ * Delete a category and its cascading items on the cloud server
+ */
+export async function deleteCategoryOnCloud(categoryId: string): Promise<void> {
+  try {
+    await fetch(`/api/menu/categories/${encodeURIComponent(categoryId)}`, {
+      method: 'DELETE',
+    });
+  } catch (e) {
+    console.warn('Server category delete endpoint note:', e);
+  }
 }
 
 /**

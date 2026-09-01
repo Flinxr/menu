@@ -42,39 +42,14 @@ const DEFAULT_DB: MenuDatabase = {
 // In-memory cache for sub-millisecond query performance
 let inMemoryDb: MenuDatabase = { ...DEFAULT_DB };
 
-// Initialize database from disk or Pantry or seed default menu
-async function initDatabase() {
+// Initialize database from disk or seed default menu
+function initDatabase() {
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
 
-    // 1. Try Pantry Cloud on startup
-    if (DEFAULT_PANTRY_ID) {
-      try {
-        const pantryRes = await fetch(`https://getpantry.cloud/apiv1/pantry/${DEFAULT_PANTRY_ID}/basket/menu_database`, {
-          headers: { 'Accept': 'application/json' }
-        });
-        if (pantryRes.ok) {
-          const pantryData = await pantryRes.json();
-          if (pantryData && (Array.isArray(pantryData.items) || Array.isArray(pantryData.categories))) {
-            inMemoryDb = {
-              categories: Array.isArray(pantryData.categories) ? pantryData.categories : INITIAL_CATEGORIES,
-              items: Array.isArray(pantryData.items) ? pantryData.items : INITIAL_MENU_ITEMS,
-              orderPhoneNumber: typeof pantryData.orderPhoneNumber === 'string' ? pantryData.orderPhoneNumber : '09900674112',
-              updatedAt: pantryData.updatedAt || new Date().toISOString(),
-            };
-            fs.writeFileSync(DB_FILE, JSON.stringify(inMemoryDb, null, 2), 'utf-8');
-            console.log(`[Database] Synced ${inMemoryDb.items.length} items & ${inMemoryDb.categories.length} categories from Pantry Cloud.`);
-            return;
-          }
-        }
-      } catch (pantryErr) {
-        console.warn('[Database] Pantry initial fetch note:', pantryErr);
-      }
-    }
-
-    // 2. Try local disk cache
+    // 1. Read authoritative disk database
     if (fs.existsSync(DB_FILE)) {
       const raw = fs.readFileSync(DB_FILE, 'utf-8');
       const parsed = JSON.parse(raw);
@@ -90,7 +65,7 @@ async function initDatabase() {
       }
     }
 
-    // Persist default DB if file does not exist
+    // 2. Persist default DB if file does not exist
     fs.writeFileSync(DB_FILE, JSON.stringify(DEFAULT_DB, null, 2), 'utf-8');
     inMemoryDb = { ...DEFAULT_DB };
     console.log('[Database] Initialized default persistent menu database on disk.');
@@ -110,7 +85,7 @@ async function persistDatabase(): Promise<void> {
     await fs.promises.writeFile(tempFile, JSON.stringify(inMemoryDb, null, 2), 'utf-8');
     await fs.promises.rename(tempFile, DB_FILE);
 
-    // Also sync to Pantry asynchronously
+    // Also sync to Pantry asynchronously without blocking
     if (DEFAULT_PANTRY_ID) {
       fetch(`https://getpantry.cloud/apiv1/pantry/${DEFAULT_PANTRY_ID}/basket/menu_database`, {
         method: 'POST',
@@ -140,12 +115,12 @@ function broadcastUpdate() {
 initDatabase();
 
 // -------------------------------------------------------------
-// Non-Google Native Database API Endpoints (100% Unrestricted in Iran)
+// Database API Endpoints (Authoritative Full-Stack REST API)
 // -------------------------------------------------------------
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', database: 'native_file_db', itemsCount: inMemoryDb.items.length });
+  res.json({ status: 'ok', database: 'native_file_db', itemsCount: inMemoryDb.items.length, categoriesCount: inMemoryDb.categories.length });
 });
 
 // GET current menu
@@ -154,7 +129,7 @@ app.get('/api/menu', (req, res) => {
   return res.json(inMemoryDb);
 });
 
-// POST update menu
+// POST update menu (atomic full update)
 app.post('/api/menu', async (req, res) => {
   try {
     const payload = req.body || {};
@@ -187,6 +162,51 @@ app.post('/api/menu', async (req, res) => {
   } catch (error: any) {
     console.error('[Database] Update error:', error);
     return res.status(500).json({ error: error.message || 'Server error' });
+  }
+});
+
+// DELETE single item
+app.delete('/api/menu/items/:id', async (req, res) => {
+  try {
+    const itemId = req.params.id;
+    const initialLen = inMemoryDb.items.length;
+    inMemoryDb.items = inMemoryDb.items.filter((item) => item.id !== itemId);
+    inMemoryDb.updatedAt = new Date().toISOString();
+
+    await persistDatabase();
+    broadcastUpdate();
+
+    return res.json({
+      success: true,
+      deleted: initialLen !== inMemoryDb.items.length,
+      items: inMemoryDb.items,
+      categories: inMemoryDb.categories,
+    });
+  } catch (error: any) {
+    console.error('[Database] Delete item error:', error);
+    return res.status(500).json({ error: error.message || 'Delete item error' });
+  }
+});
+
+// DELETE single category (and cascade delete its items)
+app.delete('/api/menu/categories/:id', async (req, res) => {
+  try {
+    const catId = req.params.id;
+    inMemoryDb.categories = inMemoryDb.categories.filter((cat) => cat.id !== catId);
+    inMemoryDb.items = inMemoryDb.items.filter((item) => item.categoryId !== catId);
+    inMemoryDb.updatedAt = new Date().toISOString();
+
+    await persistDatabase();
+    broadcastUpdate();
+
+    return res.json({
+      success: true,
+      items: inMemoryDb.items,
+      categories: inMemoryDb.categories,
+    });
+  } catch (error: any) {
+    console.error('[Database] Delete category error:', error);
+    return res.status(500).json({ error: error.message || 'Delete category error' });
   }
 });
 

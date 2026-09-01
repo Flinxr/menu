@@ -46,8 +46,11 @@ interface AdminPanelModalProps {
   categories: CategoryInfo[];
   items: MenuItem[];
   orderPhoneNumber: string;
-  onUpdateCategories: (categories: CategoryInfo[]) => void;
-  onUpdateItems: (items: MenuItem[]) => void;
+  onSaveCategory: (cat: CategoryInfo, isNew: boolean) => void;
+  onDeleteCategory: (catId: string, catTitle: string) => void;
+  onSaveItem: (item: MenuItem, isNew: boolean) => void;
+  onDeleteItem: (itemId: string, itemName: string) => void;
+  onSaveAllMenu: (payload: any) => void;
   onUpdateOrderPhone: (phone: string) => void;
   onResetToDefault: () => void;
   onLogout: () => void;
@@ -78,8 +81,11 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   categories,
   items,
   orderPhoneNumber,
-  onUpdateCategories,
-  onUpdateItems,
+  onSaveCategory,
+  onDeleteCategory,
+  onSaveItem,
+  onDeleteItem,
+  onSaveAllMenu,
   onUpdateOrderPhone,
   onResetToDefault,
   onLogout,
@@ -216,11 +222,11 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
         const content = event.target?.result as string;
         const parsed = JSON.parse(content);
         if (parsed && Array.isArray(parsed.categories) && Array.isArray(parsed.items)) {
-          onUpdateCategories(parsed.categories);
-          onUpdateItems(parsed.items);
-          if (parsed.orderPhoneNumber) {
-            onUpdateOrderPhone(parsed.orderPhoneNumber);
-          }
+          onSaveAllMenu({
+            categories: parsed.categories,
+            items: parsed.items,
+            orderPhoneNumber: typeof parsed.orderPhoneNumber === 'string' ? parsed.orderPhoneNumber : orderPhoneNumber,
+          });
           showNotice(`فایل پشتیبان با موفقیت بازیابی شد (${toPersianDigits(parsed.items.length)} غذا)`);
         } else {
           alert('فرمت فایل پشتیبان معتبر نیست.');
@@ -267,15 +273,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
       return;
     }
 
-    if (isAddingItem) {
-      const updated = [editingItem, ...items];
-      onUpdateItems(updated);
-      showNotice(`غذای جدید «${editingItem.name}» با موفقیت افزوده شد`);
-    } else {
-      const updated = items.map((i) => (i.id === editingItem.id ? editingItem : i));
-      onUpdateItems(updated);
-      showNotice(`مشخصات «${editingItem.name}» بروزرسانی شد`);
-    }
+    onSaveItem(editingItem, isAddingItem);
+    showNotice(isAddingItem ? `غذای جدید «${editingItem.name}» افزوده شد` : `مشخصات «${editingItem.name}» بروزرسانی شد`);
 
     setEditingItem(null);
     setIsAddingItem(false);
@@ -283,8 +282,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
   const handleDeleteItem = (itemId: string, itemName: string) => {
     if (window.confirm(`آیا از حذف آیتم «${itemName}» مطمئن هستید؟`)) {
-      const updated = items.filter((i) => i.id !== itemId);
-      onUpdateItems(updated);
+      onDeleteItem(itemId, itemName);
       showNotice(`آیتم «${itemName}» حذف شد`);
     }
   };
@@ -350,16 +348,15 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
         subtitle: categoryForm.subtitle.trim() || 'توضیحات دسته‌بندی',
       };
 
-      const updated = [...categories, newCat];
-      onUpdateCategories(updated);
+      onSaveCategory(newCat, true);
       showNotice(`دسته‌بندی «${newCat.title}» افزوده شد`);
     } else if (editingCategory) {
-      const updated = categories.map((c) =>
-        c.id === editingCategory.id
-          ? { ...c, title: categoryForm.title.trim(), subtitle: categoryForm.subtitle.trim() }
-          : c
-      );
-      onUpdateCategories(updated);
+      const updatedCat: CategoryInfo = {
+        ...editingCategory,
+        title: categoryForm.title.trim(),
+        subtitle: categoryForm.subtitle.trim(),
+      };
+      onSaveCategory(updatedCat, false);
       showNotice(`دسته‌بندی «${categoryForm.title}» بروزرسانی شد`);
     }
 
@@ -372,7 +369,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     if (itemsInCat > 0) {
       if (
         !window.confirm(
-          `این دسته‌بندی دارای ${toPersianDigits(itemsInCat)} آیتم است. آیا مطمئنید؟`
+          `این دسته‌بندی دارای ${toPersianDigits(itemsInCat)} آیتم است. آیا مطمئنید؟ با حذف دسته‌بندی، تمام غذاهای آن نیز حذف خواهند شد.`
         )
       ) {
         return;
@@ -383,12 +380,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
       }
     }
 
-    const updatedCategories = categories.filter((c) => c.id !== catId);
-    const updatedItems = items.filter((i) => i.categoryId !== catId);
-    onUpdateCategories(updatedCategories);
-    if (updatedItems.length !== items.length) {
-      onUpdateItems(updatedItems);
-    }
+    onDeleteCategory(catId, catTitle);
     showNotice(`دسته‌بندی «${catTitle}» و آیتم‌های مربوطه حذف شدند`);
   };
 
