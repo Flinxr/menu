@@ -1,4 +1,9 @@
-// Firebase has been deprecated and replaced with a native high-speed server database
-// which operates without Google sanctions or VPN requirements in Iran.
-export const db = null;
-export default {};
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getFirestore } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
+import firebaseConfig from '../../firebase-applet-config.json';
+
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const auth = getAuth(app);
+export default app;

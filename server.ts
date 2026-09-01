@@ -3,9 +3,11 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { CATEGORIES as INITIAL_CATEGORIES, MENU_ITEMS as INITIAL_MENU_ITEMS } from './src/data/menuData';
+import { DEFAULT_PANTRY_ID } from './src/data/pantryConfig';
 
 const app = express();
 const PORT = 3000;
+const BASKET_NAME = 'menu_database';
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -41,6 +43,53 @@ const DEFAULT_DB: MenuDatabase = {
 // In-memory cache for instant query performance
 let inMemoryDb: MenuDatabase = { ...DEFAULT_DB };
 
+// Sync to Pantry Cloud JSON in background
+async function syncToPantryCloud(payload: MenuDatabase) {
+  if (!DEFAULT_PANTRY_ID) return;
+  try {
+    const res = await fetch(`https://getpantry.cloud/apiv1/pantry/${DEFAULT_PANTRY_ID}/basket/${BASKET_NAME}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      console.log('[Pantry Cloud] Successfully synced menu to Pantry Cloud.');
+    } else {
+      console.warn(`[Pantry Cloud] Sync returned status: ${res.status}`);
+    }
+  } catch (err) {
+    console.warn('[Pantry Cloud] Background sync error:', err);
+  }
+}
+
+// Fetch from Pantry Cloud JSON on startup
+async function syncFromPantryCloud() {
+  if (!DEFAULT_PANTRY_ID) return;
+  try {
+    const res = await fetch(`https://getpantry.cloud/apiv1/pantry/${DEFAULT_PANTRY_ID}/basket/${BASKET_NAME}`, {
+      headers: { 'Accept': 'application/json' },
+    });
+    if (res.ok) {
+      const data = (await res.json()) as any;
+      if (data && (Array.isArray(data.items) || Array.isArray(data.categories))) {
+        inMemoryDb = {
+          categories: Array.isArray(data.categories) ? data.categories : inMemoryDb.categories,
+          items: Array.isArray(data.items) ? data.items : inMemoryDb.items,
+          orderPhoneNumber: typeof data.orderPhoneNumber === 'string' ? data.orderPhoneNumber : inMemoryDb.orderPhoneNumber,
+          updatedAt: data.updatedAt || new Date().toISOString(),
+        };
+        await persistDatabase();
+        console.log(`[Pantry Cloud] Loaded ${inMemoryDb.items.length} items & ${inMemoryDb.categories.length} categories from Pantry Cloud.`);
+      }
+    }
+  } catch (err) {
+    console.warn('[Pantry Cloud] Initial load error, using disk cache:', err);
+  }
+}
+
 // Initialize database from disk or seed default menu
 function initDatabase() {
   try {
@@ -59,7 +108,7 @@ function initDatabase() {
           orderPhoneNumber: typeof parsed.orderPhoneNumber === 'string' ? parsed.orderPhoneNumber : '09900674112',
           updatedAt: parsed.updatedAt || new Date().toISOString(),
         };
-        console.log(`[Database] Loaded ${inMemoryDb.items.length} items & ${inMemoryDb.categories.length} categories.`);
+        console.log(`[Database] Loaded ${inMemoryDb.items.length} items & ${inMemoryDb.categories.length} categories from disk.`);
         return;
       }
     }
@@ -96,13 +145,14 @@ function broadcastUpdate() {
   for (const client of sseClients) {
     try {
       client.write(`data: ${payload}\n\n`);
-    } catch (e) {
+    } catch {
       sseClients.delete(client);
     }
   }
 }
 
 initDatabase();
+syncFromPantryCloud();
 
 // -------------------------------------------------------------
 // Database API Endpoints (Authoritative Full-Stack REST API)
@@ -112,7 +162,8 @@ initDatabase();
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    database: 'native_file_db',
+    database: 'pantry_cloud_plus_file_db',
+    pantryId: DEFAULT_PANTRY_ID,
     itemsCount: inMemoryDb.items.length,
     categoriesCount: inMemoryDb.categories.length,
     updatedAt: inMemoryDb.updatedAt,
@@ -145,6 +196,9 @@ app.post('/api/menu', async (req, res) => {
     // Write to persistent disk storage
     await persistDatabase();
 
+    // Sync to Pantry Cloud
+    syncToPantryCloud(inMemoryDb);
+
     // Broadcast real-time change to all open screens/devices
     broadcastUpdate();
 
@@ -170,6 +224,7 @@ app.delete('/api/menu/items/:id', async (req, res) => {
     inMemoryDb.updatedAt = new Date().toISOString();
 
     await persistDatabase();
+    syncToPantryCloud(inMemoryDb);
     broadcastUpdate();
 
     return res.json({
@@ -193,6 +248,7 @@ app.delete('/api/menu/categories/:id', async (req, res) => {
     inMemoryDb.updatedAt = new Date().toISOString();
 
     await persistDatabase();
+    syncToPantryCloud(inMemoryDb);
     broadcastUpdate();
 
     return res.json({
@@ -217,6 +273,7 @@ app.post('/api/menu/reset', async (req, res) => {
     };
 
     await persistDatabase();
+    syncToPantryCloud(inMemoryDb);
     broadcastUpdate();
 
     return res.json({
@@ -261,7 +318,7 @@ app.get('/api/menu/events', (req, res) => {
 async function start() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, allowedHosts: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -274,7 +331,7 @@ async function start() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Digital Menu server running on http://0.0.0.0:${PORT}`);
+    console.log(`Digital Menu server running on http://0.0.0.0:${PORT} with Pantry Cloud ID: ${DEFAULT_PANTRY_ID}`);
   });
 }
 
