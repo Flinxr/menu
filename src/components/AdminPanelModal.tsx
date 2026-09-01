@@ -114,6 +114,15 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   // Notice Banner
   const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
 
+  // In-App Confirmation Modal (bypasses browser iframe window.confirm blocks)
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    isDanger?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
+
   // Database Connection Ping & Backup State
   const [pingStatus, setPingStatus] = useState<{ latency: number | null; status: 'idle' | 'testing' | 'success' | 'error' }>({
     latency: null,
@@ -195,10 +204,10 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
           });
           showNotice(`فایل پشتیبان با موفقیت بازیابی شد (${toPersianDigits(parsed.items.length)} غذا)`);
         } else {
-          alert('فرمت فایل پشتیبان معتبر نیست.');
+          showNotice('خطا: فرمت فایل پشتیبان معتبر نیست.');
         }
       } catch (err) {
-        alert('خطا در خواندن فایل JSON پشتیبان.');
+        showNotice('خطا در خواندن فایل JSON پشتیبان.');
       }
     };
     reader.readAsText(file);
@@ -235,7 +244,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     if (!editingItem) return;
 
     if (!editingItem.name.trim()) {
-      alert('لطفاً نام غذا را وارد کنید.');
+      showNotice('لطفاً نام غذا را وارد کنید.');
       return;
     }
 
@@ -247,10 +256,17 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   };
 
   const handleDeleteItem = (itemId: string, itemName: string) => {
-    if (window.confirm(`آیا از حذف آیتم «${itemName}» مطمئن هستید؟`)) {
-      onDeleteItem(itemId, itemName);
-      showNotice(`آیتم «${itemName}» حذف شد`);
-    }
+    setConfirmDialog({
+      title: `حذف دائم آیتم «${itemName}»`,
+      message: `آیا از حذف آیتم «${itemName}» از منو و دیتابیس سرور اطمینان دارید؟`,
+      confirmLabel: 'حذف دائمی',
+      isDanger: true,
+      onConfirm: () => {
+        onDeleteItem(itemId, itemName);
+        showNotice(`آیتم «${itemName}» از دیتابیس حذف شد`);
+        setConfirmDialog(null);
+      },
+    });
   };
 
   const handleAddIngredient = () => {
@@ -299,7 +315,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   const handleSaveCategory = (e: React.FormEvent) => {
     e.preventDefault();
     if (!categoryForm.title.trim()) {
-      alert('لطفاً عنوان دسته‌بندی را وارد کنید.');
+      showNotice('لطفاً عنوان دسته‌بندی را وارد کنید.');
       return;
     }
 
@@ -332,22 +348,19 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
   const handleDeleteCategory = (catId: string, catTitle: string) => {
     const itemsInCat = items.filter((i) => i.categoryId === catId).length;
-    if (itemsInCat > 0) {
-      if (
-        !window.confirm(
-          `این دسته‌بندی دارای ${toPersianDigits(itemsInCat)} آیتم است. آیا مطمئنید؟ با حذف دسته‌بندی، تمام غذاهای آن نیز حذف خواهند شد.`
-        )
-      ) {
-        return;
-      }
-    } else {
-      if (!window.confirm(`آیا از حذف دسته‌بندی «${catTitle}» اطمینان دارید؟`)) {
-        return;
-      }
-    }
-
-    onDeleteCategory(catId, catTitle);
-    showNotice(`دسته‌بندی «${catTitle}» و آیتم‌های مربوطه حذف شدند`);
+    setConfirmDialog({
+      title: `حذف دسته‌بندی «${catTitle}»`,
+      message: itemsInCat > 0
+        ? `این دسته‌بندی دارای ${toPersianDigits(itemsInCat)} غذا است. با حذف آن، تمام غذاهای این دسته‌بندی نیز از دیتابیس پاک خواهند شد. آیا مطمئنید؟`
+        : `آیا از حذف دسته‌بندی «${catTitle}» اطمینان دارید؟`,
+      confirmLabel: 'حذف دسته‌بندی',
+      isDanger: true,
+      onConfirm: () => {
+        onDeleteCategory(catId, catTitle);
+        showNotice(`دسته‌بندی «${catTitle}» و غذاهای آن حذف شدند`);
+        setConfirmDialog(null);
+      },
+    });
   };
 
   // Filter items in admin
@@ -1047,7 +1060,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     type="button"
                     onClick={() => {
                       if (!phoneNumberInput.trim()) {
-                        alert('لطفاً شماره تماس را وارد کنید');
+                        showNotice('لطفاً شماره تماس را وارد کنید');
                         return;
                       }
                       onUpdateOrderPhone(phoneNumberInput.trim());
@@ -1108,7 +1121,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     <button
                       type="button"
                       onClick={handleExportBackup}
-                      className="py-2.5 px-3 rounded-xl bg-[#1b2620] hover:bg-[#23332a] text-[#7ce075] text-xs font-bold border border-[#2b4c38] transition-colors flex items-center justify-center gap-2"
+                      className="py-2.5 px-3 rounded-xl bg-[#1b2620] hover:bg-[#23324a] text-[#7ce075] text-xs font-bold border border-[#2b4c38] transition-colors flex items-center justify-center gap-2"
                     >
                       <Download className="w-3.5 h-3.5" />
                       <span>دانلود فایل پشتیبان کامل</span>
@@ -1145,14 +1158,17 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    if (
-                      window.confirm(
-                        'آیا مطمئن هستید که می‌خواهید تمام تغییرات، قیمت‌ها و غذاهای ویرایش‌شده را به حالت پیش‌فرض بازگردانید؟'
-                      )
-                    ) {
-                      onResetToDefault();
-                      showNotice('منو با موفقیت به حالت پیش‌فرض بازگردانده شد');
-                    }
+                    setConfirmDialog({
+                      title: 'بازنشانی منو به حالت اولیه کارخانه',
+                      message: 'آیا مطمئن هستید که می‌خواهید تمام تغییرات، قیمت‌ها و غذاهای ویرایش‌شده را پاک کرده و منو را به حالت پیش‌فرض اولیه بازگردانید؟',
+                      confirmLabel: 'بازنشانی کامل منو',
+                      isDanger: true,
+                      onConfirm: () => {
+                        onResetToDefault();
+                        showNotice('منو با موفقیت به حالت پیش‌فرض اولیه بازگردانده شد');
+                        setConfirmDialog(null);
+                      },
+                    });
                   }}
                   className="px-4 py-2 rounded-xl bg-[#2b171c] hover:bg-[#3d1e26] text-[#ff7588] font-medium text-xs border border-[#4d242d] transition-colors flex items-center gap-1.5"
                 >
@@ -1164,6 +1180,46 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Custom In-App Confirmation Modal (bypasses browser iframe window.confirm blocks) */}
+      {confirmDialog && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-[#14141c] border border-[#2d2d3e] rounded-2xl p-5 max-w-sm w-full shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-2.5">
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${confirmDialog.isDanger ? 'bg-[#2b171c] text-[#ff7588] border border-[#482028]' : 'bg-[#1b2620] text-[#7ce075] border border-[#2b4c38]'}`}>
+                <Trash2 className="w-4 h-4" />
+              </div>
+              <h3 className="text-sm font-bold text-[#faf7ee]">{confirmDialog.title}</h3>
+            </div>
+            
+            <p className="text-xs text-[#a6a092] leading-relaxed">
+              {confirmDialog.message}
+            </p>
+
+            <div className="pt-2 flex items-center justify-end gap-2 border-t border-[#232332]">
+              <button
+                type="button"
+                onClick={() => setConfirmDialog(null)}
+                className="px-3.5 py-2 rounded-xl bg-[#1b1b26] hover:bg-[#252535] text-xs text-[#a6a092] font-medium transition-colors"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={confirmDialog.onConfirm}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-transform active:scale-95 shadow-md flex items-center gap-1.5 ${
+                  confirmDialog.isDanger 
+                    ? 'bg-[#ff7588] hover:bg-[#ff8f9f] text-[#09090b]' 
+                    : 'bg-[#7ce075] hover:bg-[#8ef087] text-[#09090b]'
+                }`}
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>{confirmDialog.confirmLabel || 'تأیید و انجام'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

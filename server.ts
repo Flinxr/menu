@@ -3,18 +3,17 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { CATEGORIES as INITIAL_CATEGORIES, MENU_ITEMS as INITIAL_MENU_ITEMS } from './src/data/menuData';
-import { DEFAULT_PANTRY_ID } from './src/data/pantryConfig';
 
 const app = express();
 const PORT = 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
-// Universal CORS headers for seamless cross-origin and iframe connectivity
+// Universal CORS & caching headers for seamless cross-origin and iframe connectivity
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Cache-Control');
+  res.setHeader('Access-Control-Allow-Headers', '*');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
@@ -39,7 +38,7 @@ const DEFAULT_DB: MenuDatabase = {
   updatedAt: new Date().toISOString(),
 };
 
-// In-memory cache for sub-millisecond query performance
+// In-memory cache for instant query performance
 let inMemoryDb: MenuDatabase = { ...DEFAULT_DB };
 
 // Initialize database from disk or seed default menu
@@ -49,7 +48,7 @@ function initDatabase() {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
 
-    // 1. Read authoritative disk database
+    // Read authoritative disk database
     if (fs.existsSync(DB_FILE)) {
       const raw = fs.readFileSync(DB_FILE, 'utf-8');
       const parsed = JSON.parse(raw);
@@ -60,17 +59,17 @@ function initDatabase() {
           orderPhoneNumber: typeof parsed.orderPhoneNumber === 'string' ? parsed.orderPhoneNumber : '09900674112',
           updatedAt: parsed.updatedAt || new Date().toISOString(),
         };
-        console.log(`[Database] Loaded ${inMemoryDb.items.length} items & ${inMemoryDb.categories.length} categories from persistent storage.`);
+        console.log(`[Database] Loaded ${inMemoryDb.items.length} items & ${inMemoryDb.categories.length} categories.`);
         return;
       }
     }
 
-    // 2. Persist default DB if file does not exist
+    // Persist default DB if file does not exist
     fs.writeFileSync(DB_FILE, JSON.stringify(DEFAULT_DB, null, 2), 'utf-8');
     inMemoryDb = { ...DEFAULT_DB };
     console.log('[Database] Initialized default persistent menu database on disk.');
   } catch (err) {
-    console.error('[Database] Failed to initialize database file, running in-memory fallback:', err);
+    console.error('[Database] Failed to initialize database file:', err);
     inMemoryDb = { ...DEFAULT_DB };
   }
 }
@@ -84,15 +83,6 @@ async function persistDatabase(): Promise<void> {
     const tempFile = `${DB_FILE}.tmp.${Date.now()}`;
     await fs.promises.writeFile(tempFile, JSON.stringify(inMemoryDb, null, 2), 'utf-8');
     await fs.promises.rename(tempFile, DB_FILE);
-
-    // Also sync to Pantry asynchronously without blocking
-    if (DEFAULT_PANTRY_ID) {
-      fetch(`https://getpantry.cloud/apiv1/pantry/${DEFAULT_PANTRY_ID}/basket/menu_database`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(inMemoryDb),
-      }).catch((e) => console.warn('[Database] Pantry sync background note:', e));
-    }
   } catch (err) {
     console.error('[Database] Error persisting database to disk:', err);
   }
@@ -120,7 +110,13 @@ initDatabase();
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', database: 'native_file_db', itemsCount: inMemoryDb.items.length, categoriesCount: inMemoryDb.categories.length });
+  res.json({
+    status: 'ok',
+    database: 'native_file_db',
+    itemsCount: inMemoryDb.items.length,
+    categoriesCount: inMemoryDb.categories.length,
+    updatedAt: inMemoryDb.updatedAt,
+  });
 });
 
 // GET current menu
@@ -146,7 +142,7 @@ app.post('/api/menu', async (req, res) => {
     }
     inMemoryDb.updatedAt = updatedAt;
 
-    // Asynchronously write to persistent storage
+    // Write to persistent disk storage
     await persistDatabase();
 
     // Broadcast real-time change to all open screens/devices
@@ -247,7 +243,12 @@ app.get('/api/menu/events', (req, res) => {
 
   // Keep-alive heartbeat every 20s
   const heartbeat = setInterval(() => {
-    res.write(': keepalive\n\n');
+    try {
+      res.write(': keepalive\n\n');
+    } catch {
+      clearInterval(heartbeat);
+      sseClients.delete(res);
+    }
   }, 20000);
 
   req.on('close', () => {

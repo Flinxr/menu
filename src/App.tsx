@@ -59,7 +59,15 @@ export default function App() {
     if (isInitial) setIsLoading(true);
     try {
       setCloudError(null);
-      const cloudData = await fetchMenuFromCloud();
+      let cloudData: CloudMenuPayload;
+      try {
+        cloudData = await fetchMenuFromCloud();
+      } catch (firstErr) {
+        // Retry once after 500ms in case of server proxy startup latency
+        await new Promise((r) => setTimeout(r, 500));
+        cloudData = await fetchMenuFromCloud();
+      }
+
       if (cloudData && (cloudData.items.length > 0 || cloudData.categories.length > 0)) {
         setCategories(cloudData.categories);
         setMenuItems(cloudData.items);

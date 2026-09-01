@@ -8,18 +8,15 @@ export interface CloudMenuPayload {
 }
 
 /**
- * Fetch menu data exclusively and directly from the server database (/api/menu).
+ * Fetch menu data directly from the server database (/api/menu).
  * No localStorage caching or client-side fallbacks.
- * If server is unreachable or errors, it throws an error to display the connection failure directly.
+ * Uses query timestamp to bypass any browser cache.
  */
 export async function fetchMenuFromCloud(): Promise<CloudMenuPayload> {
-  const response = await fetch('/api/menu', {
+  const response = await fetch(`/api/menu?_t=${Date.now()}`, {
     method: 'GET',
-    cache: 'no-store',
     headers: {
       'Accept': 'application/json',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
     },
   });
 
@@ -42,7 +39,6 @@ export async function fetchMenuFromCloud(): Promise<CloudMenuPayload> {
 
 /**
  * Saves entire menu payload directly to the server database.
- * Throws error immediately if server write fails.
  */
 export async function saveMenuToCloud(payload: {
   categories: CategoryInfo[];
@@ -53,7 +49,7 @@ export async function saveMenuToCloud(payload: {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Accept': 'application/json',
     },
     body: JSON.stringify(payload),
   });
@@ -79,7 +75,6 @@ export async function deleteItemOnCloud(itemId: string): Promise<CloudMenuPayloa
     method: 'DELETE',
     headers: {
       'Accept': 'application/json',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
     },
   });
 
@@ -104,7 +99,6 @@ export async function deleteCategoryOnCloud(categoryId: string): Promise<CloudMe
     method: 'DELETE',
     headers: {
       'Accept': 'application/json',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
     },
   });
 
@@ -129,7 +123,7 @@ export async function resetMenuOnCloud(): Promise<CloudMenuPayload> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Accept': 'application/json',
     },
   });
 
