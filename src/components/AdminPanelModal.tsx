@@ -384,8 +384,12 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     }
 
     const updatedCategories = categories.filter((c) => c.id !== catId);
+    const updatedItems = items.filter((i) => i.categoryId !== catId);
     onUpdateCategories(updatedCategories);
-    showNotice(`دسته‌بندی «${catTitle}» حذف شد`);
+    if (updatedItems.length !== items.length) {
+      onUpdateItems(updatedItems);
+    }
+    showNotice(`دسته‌بندی «${catTitle}» و آیتم‌های مربوطه حذف شدند`);
   };
 
   // Filter items in admin

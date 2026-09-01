@@ -1,5 +1,6 @@
 import { CategoryInfo, MenuItem } from '../types';
 import { DEFAULT_PANTRY_ID } from '../data/pantryConfig';
+import { CATEGORIES as INITIAL_CATEGORIES, MENU_ITEMS as INITIAL_MENU_ITEMS } from '../data/menuData';
 
 export interface CloudMenuPayload {
   categories: CategoryInfo[];
@@ -24,11 +25,11 @@ export function sanitizePantryId(input: string): string {
   return cleaned.replace(/^['"\s/]+|['"\s/]+$/g, '').trim();
 }
 
-// Helper to get Pantry storage configuration (from localStorage, URL param, or hardcoded DEFAULT_PANTRY_ID)
+// Helper to get Pantry storage configuration
 export function getCustomStorageConfig(): { pantryId: string } {
   if (typeof window === 'undefined') return { pantryId: sanitizePantryId(DEFAULT_PANTRY_ID) };
   
-  // 1. Check if URL has ?pantry=... (useful for QR codes or instant setup on any device)
+  // 1. Check if URL has ?pantry=...
   try {
     const urlParams = new URLSearchParams(window.location.search);
     const queryPantry = urlParams.get('pantry') || urlParams.get('pantryId');
@@ -68,14 +69,14 @@ export function setCustomStorageConfig(config: { pantryId?: string }): void {
   }
 }
 
-// Helper to get local cached data (instant offline/fast hydration)
+// Helper to get local cached data
 export function getLocalCachedMenu(): CloudMenuPayload | null {
   if (typeof window === 'undefined') return null;
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_CACHE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && (parsed.categories || parsed.items)) {
+      if (parsed && (Array.isArray(parsed.categories) || Array.isArray(parsed.items))) {
         return parsed;
       }
     }
@@ -96,16 +97,13 @@ export function setLocalCachedMenu(data: CloudMenuPayload): void {
 }
 
 /**
- * Fetch menu data from Pantry.cloud or local cache:
- * 1. Custom Pantry.cloud basket (if pantryId configured)
- * 2. Local/Hosted Server API (/api/menu)
- * 3. Local cached data (if pure static frontend)
+ * Fetch menu data from Pantry.cloud or server API:
+ * 1. Pantry.cloud basket (realtime cloud database)
+ * 2. Hosted Server API (/api/menu)
+ * 3. Local cached data (offline fallback)
  */
 export async function fetchMenuFromCloud(): Promise<CloudMenuPayload | null> {
   const { pantryId } = getCustomStorageConfig();
-  const cached = getLocalCachedMenu();
-
-  let fetchedPayload: CloudMenuPayload | null = null;
 
   // 1. Pantry Cloud (Free, Zero-binding REST storage, 100% unblocked)
   if (pantryId) {
@@ -123,61 +121,50 @@ export async function fetchMenuFromCloud(): Promise<CloudMenuPayload | null> {
       if (res.ok) {
         const data = await res.json();
         if (data && (Array.isArray(data.items) || Array.isArray(data.categories))) {
-          fetchedPayload = {
+          const payload: CloudMenuPayload = {
             categories: Array.isArray(data.categories) ? data.categories : [],
             items: Array.isArray(data.items) ? data.items : [],
             orderPhoneNumber: typeof data.orderPhoneNumber === 'string' ? data.orderPhoneNumber : '09900674112',
             updatedAt: data.updatedAt || new Date().toISOString(),
           };
+          setLocalCachedMenu(payload);
+          return payload;
         }
       }
     } catch (e) {
-      console.warn('Pantry fetch failed:', e);
+      console.warn('Pantry fetch failed, checking server endpoint:', e);
     }
   }
 
-  // 2. Local/Hosted Server API (/api/menu) if running and pantry didn't return
-  if (!fetchedPayload) {
-    try {
-      const response = await fetch('/api/menu', {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-        },
-      });
+  // 2. Local/Hosted Server API (/api/menu)
+  try {
+    const response = await fetch('/api/menu', {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+      },
+    });
 
-      if (response.ok) {
-        const data = await response.json();
-        if (data && (Array.isArray(data.items) || Array.isArray(data.categories))) {
-          fetchedPayload = {
-            categories: Array.isArray(data.categories) ? data.categories : [],
-            items: Array.isArray(data.items) ? data.items : [],
-            orderPhoneNumber: typeof data.orderPhoneNumber === 'string' ? data.orderPhoneNumber : '09900674112',
-            updatedAt: data.updatedAt || new Date().toISOString(),
-          };
-        }
-      }
-    } catch {
-      // Expected on pure static host
-    }
-  }
-
-  // If we fetched new data from remote, verify against local cache timestamp
-  if (fetchedPayload) {
-    if (cached && cached.updatedAt && fetchedPayload.updatedAt) {
-      const localTime = new Date(cached.updatedAt).getTime();
-      const remoteTime = new Date(fetchedPayload.updatedAt).getTime();
-      // If local cache is newer (within 1 minute) due to recent local edit/delete, preserve local
-      if (localTime > remoteTime) {
-        return cached;
+    if (response.ok) {
+      const data = await response.json();
+      if (data && (Array.isArray(data.items) || Array.isArray(data.categories))) {
+        const payload: CloudMenuPayload = {
+          categories: Array.isArray(data.categories) ? data.categories : [],
+          items: Array.isArray(data.items) ? data.items : [],
+          orderPhoneNumber: typeof data.orderPhoneNumber === 'string' ? data.orderPhoneNumber : '09900674112',
+          updatedAt: data.updatedAt || new Date().toISOString(),
+        };
+        setLocalCachedMenu(payload);
+        return payload;
       }
     }
-    setLocalCachedMenu(fetchedPayload);
-    return fetchedPayload;
+  } catch {
+    // Static host fallback
   }
 
   // 3. LocalStorage Fallback
+  const cached = getLocalCachedMenu();
   if (cached) {
     return cached;
   }
@@ -186,7 +173,7 @@ export async function fetchMenuFromCloud(): Promise<CloudMenuPayload | null> {
 }
 
 /**
- * Helper to post to Pantry with retry on 429
+ * Helper to post to Pantry with retry
  */
 async function postToPantry(pantryId: string, payload: CloudMenuPayload, retries = 2): Promise<boolean> {
   const pantryUrl = `https://getpantry.cloud/apiv1/pantry/${pantryId}/basket/menu_database`;
@@ -201,12 +188,12 @@ async function postToPantry(pantryId: string, payload: CloudMenuPayload, retries
         return true;
       }
       if (res.status === 429 && attempt < retries) {
-        await new Promise((r) => setTimeout(r, 1200 * (attempt + 1)));
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
         continue;
       }
     } catch (e) {
       if (attempt < retries) {
-        await new Promise((r) => setTimeout(r, 800));
+        await new Promise((r) => setTimeout(r, 600));
         continue;
       }
     }
@@ -215,7 +202,7 @@ async function postToPantry(pantryId: string, payload: CloudMenuPayload, retries
 }
 
 /**
- * Saves entire menu or updates fields to Pantry.cloud & local cache.
+ * Saves entire menu or updates fields to Pantry.cloud & server & local cache.
  */
 export async function saveMenuToCloud(payload: Partial<CloudMenuPayload>): Promise<void> {
   const { pantryId } = getCustomStorageConfig();
@@ -228,17 +215,17 @@ export async function saveMenuToCloud(payload: Partial<CloudMenuPayload>): Promi
     updatedAt: new Date().toISOString(),
   };
 
-  // Always update local cache immediately for instant UI responsiveness
+  // Always update local cache immediately
   setLocalCachedMenu(updatedPayload);
 
   const savePromises: Promise<any>[] = [];
 
-  // 1. Save to Pantry Cloud if configured
+  // 1. Save to Pantry Cloud
   if (pantryId) {
     savePromises.push(postToPantry(pantryId, updatedPayload));
   }
 
-  // 2. Save to Server Database (/api/menu) if backend server is running
+  // 2. Save to Server Database (/api/menu)
   savePromises.push(
     fetch('/api/menu', {
       method: 'POST',
@@ -253,14 +240,14 @@ export async function saveMenuToCloud(payload: Partial<CloudMenuPayload>): Promi
 }
 
 /**
- * Resets the entire menu to default.
+ * Resets the entire menu to default factory settings across cloud and local.
  */
 export async function resetMenuOnCloud(): Promise<CloudMenuPayload> {
   const { pantryId } = getCustomStorageConfig();
 
   const defaultData: CloudMenuPayload = {
-    categories: [],
-    items: [],
+    categories: INITIAL_CATEGORIES,
+    items: INITIAL_MENU_ITEMS,
     orderPhoneNumber: '09900674112',
     updatedAt: new Date().toISOString(),
   };
@@ -270,14 +257,7 @@ export async function resetMenuOnCloud(): Promise<CloudMenuPayload> {
   const promises: Promise<any>[] = [];
 
   if (pantryId) {
-    const pantryUrl = `https://getpantry.cloud/apiv1/pantry/${pantryId}/basket/menu_database`;
-    promises.push(
-      fetch(pantryUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(defaultData),
-      }).catch((e) => console.warn('Pantry reset error:', e))
-    );
+    promises.push(postToPantry(pantryId, defaultData));
   }
 
   promises.push(
@@ -317,7 +297,7 @@ export function subscribeToCloudMenu(
       eventSource.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data && (data.items || data.categories)) {
+          if (data && (Array.isArray(data.items) || Array.isArray(data.categories))) {
             const payload: CloudMenuPayload = {
               categories: Array.isArray(data.categories) ? data.categories : [],
               items: Array.isArray(data.items) ? data.items : [],
@@ -340,7 +320,7 @@ export function subscribeToCloudMenu(
         if (!isClosed) {
           retryTimer = setTimeout(() => {
             if (!isClosed) connectSSE();
-          }, 10000);
+          }, 15000);
         }
         if (onError) onError(err);
       };

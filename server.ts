@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { CATEGORIES as INITIAL_CATEGORIES, MENU_ITEMS as INITIAL_MENU_ITEMS } from './src/data/menuData';
+import { DEFAULT_PANTRY_ID } from './src/data/pantryConfig';
 
 const app = express();
 const PORT = 3000;
@@ -41,20 +42,46 @@ const DEFAULT_DB: MenuDatabase = {
 // In-memory cache for sub-millisecond query performance
 let inMemoryDb: MenuDatabase = { ...DEFAULT_DB };
 
-// Initialize database from disk or seed default menu
-function initDatabase() {
+// Initialize database from disk or Pantry or seed default menu
+async function initDatabase() {
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
 
+    // 1. Try Pantry Cloud on startup
+    if (DEFAULT_PANTRY_ID) {
+      try {
+        const pantryRes = await fetch(`https://getpantry.cloud/apiv1/pantry/${DEFAULT_PANTRY_ID}/basket/menu_database`, {
+          headers: { 'Accept': 'application/json' }
+        });
+        if (pantryRes.ok) {
+          const pantryData = await pantryRes.json();
+          if (pantryData && (Array.isArray(pantryData.items) || Array.isArray(pantryData.categories))) {
+            inMemoryDb = {
+              categories: Array.isArray(pantryData.categories) ? pantryData.categories : INITIAL_CATEGORIES,
+              items: Array.isArray(pantryData.items) ? pantryData.items : INITIAL_MENU_ITEMS,
+              orderPhoneNumber: typeof pantryData.orderPhoneNumber === 'string' ? pantryData.orderPhoneNumber : '09900674112',
+              updatedAt: pantryData.updatedAt || new Date().toISOString(),
+            };
+            fs.writeFileSync(DB_FILE, JSON.stringify(inMemoryDb, null, 2), 'utf-8');
+            console.log(`[Database] Synced ${inMemoryDb.items.length} items & ${inMemoryDb.categories.length} categories from Pantry Cloud.`);
+            return;
+          }
+        }
+      } catch (pantryErr) {
+        console.warn('[Database] Pantry initial fetch note:', pantryErr);
+      }
+    }
+
+    // 2. Try local disk cache
     if (fs.existsSync(DB_FILE)) {
       const raw = fs.readFileSync(DB_FILE, 'utf-8');
       const parsed = JSON.parse(raw);
       if (parsed && Array.isArray(parsed.categories) && Array.isArray(parsed.items)) {
         inMemoryDb = {
-          categories: parsed.categories.length > 0 ? parsed.categories : INITIAL_CATEGORIES,
-          items: parsed.items.length > 0 ? parsed.items : INITIAL_MENU_ITEMS,
+          categories: parsed.categories,
+          items: parsed.items,
           orderPhoneNumber: typeof parsed.orderPhoneNumber === 'string' ? parsed.orderPhoneNumber : '09900674112',
           updatedAt: parsed.updatedAt || new Date().toISOString(),
         };
@@ -82,6 +109,15 @@ async function persistDatabase(): Promise<void> {
     const tempFile = `${DB_FILE}.tmp.${Date.now()}`;
     await fs.promises.writeFile(tempFile, JSON.stringify(inMemoryDb, null, 2), 'utf-8');
     await fs.promises.rename(tempFile, DB_FILE);
+
+    // Also sync to Pantry asynchronously
+    if (DEFAULT_PANTRY_ID) {
+      fetch(`https://getpantry.cloud/apiv1/pantry/${DEFAULT_PANTRY_ID}/basket/menu_database`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(inMemoryDb),
+      }).catch((e) => console.warn('[Database] Pantry sync background note:', e));
+    }
   } catch (err) {
     console.error('[Database] Error persisting database to disk:', err);
   }

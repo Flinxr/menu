@@ -1,8 +1,9 @@
 // Cloudflare Pages Function for /api/menu & /api/menu/reset
-// Native Cloudflare KV support with fallback defaults
+// Native Cloudflare KV support + Pantry Cloud edge sync
 // 100% Unrestricted, zero Google dependencies, ultra-fast worldwide edge
 
 import { CATEGORIES as INITIAL_CATEGORIES, MENU_ITEMS as INITIAL_MENU_ITEMS } from '../../src/data/menuData';
+import { DEFAULT_PANTRY_ID } from '../../src/data/pantryConfig';
 
 interface Env {
   // Optional Cloudflare KV Namespace binding named MENU_KV
@@ -35,14 +36,14 @@ const DEFAULT_MENU_PAYLOAD = {
   updatedAt: new Date().toISOString(),
 };
 
-// In-worker memory cache for instant hot reads
+// In-worker memory cache for fast warm reads
 let memoryCache: any = null;
 
 export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
   try {
     if (env.MENU_KV) {
       const kvData = await env.MENU_KV.get('menu_database_main', 'json');
-      if (kvData && (kvData.categories || kvData.items)) {
+      if (kvData && (Array.isArray(kvData.categories) || Array.isArray(kvData.items))) {
         memoryCache = kvData;
         return new Response(JSON.stringify(kvData), {
           headers: {
@@ -51,6 +52,36 @@ export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
             ...CORS_HEADERS,
           },
         });
+      }
+    }
+
+    // Try Pantry Cloud directly
+    if (DEFAULT_PANTRY_ID) {
+      try {
+        const pantryRes = await fetch(`https://getpantry.cloud/apiv1/pantry/${DEFAULT_PANTRY_ID}/basket/menu_database`, {
+          headers: { 'Accept': 'application/json' }
+        });
+        if (pantryRes.ok) {
+          const pantryData = await pantryRes.json();
+          if (pantryData && (Array.isArray(pantryData.items) || Array.isArray(pantryData.categories))) {
+            const result = {
+              categories: Array.isArray(pantryData.categories) ? pantryData.categories : [],
+              items: Array.isArray(pantryData.items) ? pantryData.items : [],
+              orderPhoneNumber: typeof pantryData.orderPhoneNumber === 'string' ? pantryData.orderPhoneNumber : '09900674112',
+              updatedAt: pantryData.updatedAt || new Date().toISOString(),
+            };
+            memoryCache = result;
+            return new Response(JSON.stringify(result), {
+              headers: {
+                'Content-Type': 'application/json',
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                ...CORS_HEADERS,
+              },
+            });
+          }
+        }
+      } catch {
+        // Continue to fallback
       }
     }
 
@@ -101,6 +132,15 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
     if (env.MENU_KV) {
       await env.MENU_KV.put('menu_database_main', JSON.stringify(updatedData));
+    }
+
+    // Sync to Pantry
+    if (DEFAULT_PANTRY_ID) {
+      fetch(`https://getpantry.cloud/apiv1/pantry/${DEFAULT_PANTRY_ID}/basket/menu_database`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedData),
+      }).catch(() => {});
     }
 
     return new Response(JSON.stringify({ success: true, ...updatedData }), {

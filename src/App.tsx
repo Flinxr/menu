@@ -9,6 +9,7 @@ import { CATEGORIES as INITIAL_CATEGORIES, MENU_ITEMS as INITIAL_MENU_ITEMS } fr
 import { 
   fetchMenuFromCloud, 
   saveMenuToCloud, 
+  resetMenuOnCloud,
   subscribeToCloudMenu, 
   CloudMenuPayload 
 } from './lib/cloudMenuService';
@@ -224,14 +225,10 @@ export default function App() {
   const handleResetToDefault = async () => {
     setIsSyncing(true);
     try {
-      await saveMenuToCloud({
-        categories: INITIAL_CATEGORIES,
-        items: INITIAL_MENU_ITEMS,
-        orderPhoneNumber: '09900674112',
-      });
-      setCategories(INITIAL_CATEGORIES);
-      setMenuItems(INITIAL_MENU_ITEMS);
-      setOrderPhoneNumber('09900674112');
+      const resetData = await resetMenuOnCloud();
+      setCategories(resetData.categories);
+      setMenuItems(resetData.items);
+      setOrderPhoneNumber(resetData.orderPhoneNumber);
       showToast('منو در دیتابیس به حالت اولیه بازگردانده شد');
     } catch (err) {
       console.error('Error resetting menu on database:', err);
