@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Utensils, Search, Share2, ShieldCheck } from 'lucide-react';
+import { Utensils, Search, Share2, Download, ShieldCheck } from 'lucide-react';
 
 interface HeaderProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   onShareMenu: () => void;
+  onInstallApp: () => void;
   onOpenAdminLogin: () => void;
   isAdminLoggedIn?: boolean;
   onOpenAdminPanel?: () => void;
@@ -14,6 +15,7 @@ export const Header: React.FC<HeaderProps> = ({
   searchQuery,
   onSearchChange,
   onShareMenu,
+  onInstallApp,
   onOpenAdminLogin,
   isAdminLoggedIn = false,
   onOpenAdminPanel,
@@ -140,22 +142,36 @@ export const Header: React.FC<HeaderProps> = ({
                   </span>
                 )}
               </div>
-              <p className="text-[10px] text-[#9e988c] font-normal leading-none mt-0.5">
-                {isPressing ? 'در حال باز کردن مدیریت...' : 'منوی دیجیتال آنلاین'}
-              </p>
+              {isPressing && (
+                <p className="text-[10px] text-[#e8dfc8] font-normal leading-none mt-0.5">
+                  در حال باز کردن مدیریت...
+                </p>
+              )}
             </div>
           </div>
 
-          {/* Share & Add to Home Screen Button */}
-          <button
-            id="header-share-btn"
-            onClick={onShareMenu}
-            className="flex items-center gap-1.5 py-1.5 px-2.5 rounded-xl bg-[#181820] hover:bg-[#22222c] border border-[#2e2e3c] hover:border-[#424255] text-[#d8cfb8] transition-all shadow-sm group"
-            title="نصب اپلیکیشن و اشتراک‌گذاری"
-          >
-            <Share2 className="w-3.5 h-3.5 text-[#e8dfc8] group-hover:scale-110 transition-transform" />
-            <span className="text-[11px] font-medium hidden sm:inline">نصب اپ / اشتراک</span>
-          </button>
+          {/* Action Buttons: Add to Home Screen & Share */}
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {/* Install / Download App Button */}
+            <button
+              id="header-install-btn"
+              onClick={onInstallApp}
+              className="p-2 rounded-xl bg-[#181820] hover:bg-[#22222c] border border-[#2e2e3c] hover:border-[#424255] text-[#d8cfb8] transition-all shadow-sm group active:scale-95"
+              title="افزودن به صفحه اصلی (Add to Home Screen)"
+            >
+              <Download className="w-4 h-4 text-[#e8dfc8] group-hover:scale-110 transition-transform" />
+            </button>
+
+            {/* Share Button */}
+            <button
+              id="header-share-btn"
+              onClick={onShareMenu}
+              className="p-2 rounded-xl bg-[#181820] hover:bg-[#22222c] border border-[#2e2e3c] hover:border-[#424255] text-[#d8cfb8] transition-all shadow-sm group active:scale-95"
+              title="اشتراک‌گذاری منو"
+            >
+              <Share2 className="w-4 h-4 text-[#e8dfc8] group-hover:scale-110 transition-transform" />
+            </button>
+          </div>
         </div>
 
         {/* Minimal Search Bar */}

@@ -1,6 +1,4 @@
 import { CategoryInfo, MenuItem } from '../types';
-import { DEFAULT_PANTRY_ID } from '../data/pantryConfig';
-import { CATEGORIES as INITIAL_CATEGORIES, MENU_ITEMS as INITIAL_MENU_ITEMS } from '../data/menuData';
 
 export interface CloudMenuPayload {
   categories: CategoryInfo[];
@@ -9,291 +7,147 @@ export interface CloudMenuPayload {
   updatedAt?: string;
 }
 
-const LOCAL_STORAGE_CACHE_KEY = 'digital_menu_cached_data_v3';
-const PANTRY_ID_KEY = 'digital_menu_pantry_id';
-
 /**
- * Sanitizes any raw input (extracts UUID even if full URL is pasted)
+ * Fetch menu data exclusively and directly from the server database (/api/menu).
+ * No localStorage caching or client-side fallbacks.
+ * If server is unreachable or errors, it throws an error to display the connection failure directly.
  */
-export function sanitizePantryId(input: string): string {
-  if (!input) return '';
-  let cleaned = input.trim();
-  const match = cleaned.match(/pantry\/([a-zA-Z0-9_-]+)/i);
-  if (match && match[1]) {
-    return match[1].trim();
-  }
-  return cleaned.replace(/^['"\s/]+|['"\s/]+$/g, '').trim();
-}
+export async function fetchMenuFromCloud(): Promise<CloudMenuPayload> {
+  const response = await fetch('/api/menu', {
+    method: 'GET',
+    cache: 'no-store',
+    headers: {
+      'Accept': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+    },
+  });
 
-// Helper to get Pantry storage configuration
-export function getCustomStorageConfig(): { pantryId: string } {
-  if (typeof window === 'undefined') return { pantryId: sanitizePantryId(DEFAULT_PANTRY_ID) };
-  
-  // 1. Check if URL has ?pantry=...
-  try {
-    const urlParams = new URLSearchParams(window.location.search);
-    const queryPantry = urlParams.get('pantry') || urlParams.get('pantryId');
-    if (queryPantry) {
-      const sanitized = sanitizePantryId(queryPantry);
-      if (sanitized) {
-        localStorage.setItem(PANTRY_ID_KEY, sanitized);
-        return { pantryId: sanitized };
-      }
-    }
-  } catch (e) {
-    // ignore
+  if (!response.ok) {
+    throw new Error(`خطا در ارتباط با دیتابیس سرور (کد خطا: ${response.status})`);
   }
 
-  // 2. Check localStorage
-  const raw = localStorage.getItem(PANTRY_ID_KEY) || '';
-  const sanitized = sanitizePantryId(raw);
-  if (sanitized) {
-    return { pantryId: sanitized };
+  const data = await response.json();
+  if (!data || (!Array.isArray(data.items) && !Array.isArray(data.categories))) {
+    throw new Error('فرمت اطلاعات دریافتی از دیتابیس نامعتبر است');
   }
 
-  // 3. Fallback to global DEFAULT_PANTRY_ID if defined in code
   return {
-    pantryId: sanitizePantryId(DEFAULT_PANTRY_ID),
+    categories: Array.isArray(data.categories) ? data.categories : [],
+    items: Array.isArray(data.items) ? data.items : [],
+    orderPhoneNumber: typeof data.orderPhoneNumber === 'string' ? data.orderPhoneNumber : '09900674112',
+    updatedAt: data.updatedAt || new Date().toISOString(),
   };
 }
 
-export function setCustomStorageConfig(config: { pantryId?: string }): void {
-  if (typeof window === 'undefined') return;
-  if (config.pantryId !== undefined) {
-    const cleaned = sanitizePantryId(config.pantryId);
-    if (cleaned) {
-      localStorage.setItem(PANTRY_ID_KEY, cleaned);
-    } else {
-      localStorage.removeItem(PANTRY_ID_KEY);
-    }
-  }
-}
+/**
+ * Saves entire menu payload directly to the server database.
+ * Throws error immediately if server write fails.
+ */
+export async function saveMenuToCloud(payload: {
+  categories: CategoryInfo[];
+  items: MenuItem[];
+  orderPhoneNumber?: string;
+}): Promise<CloudMenuPayload> {
+  const response = await fetch('/api/menu', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+    },
+    body: JSON.stringify(payload),
+  });
 
-// Helper to get local cached data
-export function getLocalCachedMenu(): CloudMenuPayload | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_CACHE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && (Array.isArray(parsed.categories) || Array.isArray(parsed.items))) {
-        return parsed;
-      }
-    }
-  } catch (e) {
-    console.warn('Failed to read local menu cache:', e);
+  if (!response.ok) {
+    throw new Error(`خطا در ذخیره‌سازی روی سرور (کد خطا: ${response.status})`);
   }
-  return null;
-}
 
-// Helper to save local cached data
-export function setLocalCachedMenu(data: CloudMenuPayload): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(LOCAL_STORAGE_CACHE_KEY, JSON.stringify(data));
-  } catch (e) {
-    console.warn('Failed to set local menu cache:', e);
-  }
+  const result = await response.json();
+  return {
+    categories: Array.isArray(result.categories) ? result.categories : payload.categories,
+    items: Array.isArray(result.items) ? result.items : payload.items,
+    orderPhoneNumber: result.orderPhoneNumber || payload.orderPhoneNumber || '09900674112',
+    updatedAt: result.updatedAt || new Date().toISOString(),
+  };
 }
 
 /**
- * Fetch menu data from database:
- * 1. Hosted Server API (/api/menu) - Authoritative Primary Source
- * 2. Pantry.cloud basket (realtime cloud fallback)
- * 3. Local cached data (offline fallback)
+ * Delete a single item directly on the server database
  */
-export async function fetchMenuFromCloud(): Promise<CloudMenuPayload | null> {
-  const { pantryId } = getCustomStorageConfig();
+export async function deleteItemOnCloud(itemId: string): Promise<CloudMenuPayload> {
+  const response = await fetch(`/api/menu/items/${encodeURIComponent(itemId)}`, {
+    method: 'DELETE',
+    headers: {
+      'Accept': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+    },
+  });
 
-  // 1. Primary Source of Truth: Hosted Server API (/api/menu)
-  try {
-    const response = await fetch('/api/menu', {
-      method: 'GET',
-      cache: 'no-store',
-      headers: {
-        'Accept': 'application/json',
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-      },
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data && (Array.isArray(data.items) || Array.isArray(data.categories))) {
-        const payload: CloudMenuPayload = {
-          categories: Array.isArray(data.categories) ? data.categories : [],
-          items: Array.isArray(data.items) ? data.items : [],
-          orderPhoneNumber: typeof data.orderPhoneNumber === 'string' ? data.orderPhoneNumber : '09900674112',
-          updatedAt: data.updatedAt || new Date().toISOString(),
-        };
-        setLocalCachedMenu(payload);
-        return payload;
-      }
-    }
-  } catch {
-    // Proceed to fallback
+  if (!response.ok) {
+    throw new Error(`خطا در حذف آیتم از سرور (کد خطا: ${response.status})`);
   }
 
-  // 2. Secondary Fallback: Pantry Cloud
-  if (pantryId) {
-    try {
-      const pantryUrl = `https://getpantry.cloud/apiv1/pantry/${pantryId}/basket/menu_database`;
-      const res = await fetch(pantryUrl, {
-        method: 'GET',
-        cache: 'no-store',
-        headers: { 
-          'Accept': 'application/json',
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache'
-        },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && (Array.isArray(data.items) || Array.isArray(data.categories))) {
-          const payload: CloudMenuPayload = {
-            categories: Array.isArray(data.categories) ? data.categories : [],
-            items: Array.isArray(data.items) ? data.items : [],
-            orderPhoneNumber: typeof data.orderPhoneNumber === 'string' ? data.orderPhoneNumber : '09900674112',
-            updatedAt: data.updatedAt || new Date().toISOString(),
-          };
-          setLocalCachedMenu(payload);
-          return payload;
-        }
-      }
-    } catch (e) {
-      console.warn('Pantry fallback fetch note:', e);
-    }
-  }
-
-  // 3. LocalStorage Fallback
-  const cached = getLocalCachedMenu();
-  if (cached) {
-    return cached;
-  }
-
-  return null;
-}
-
-/**
- * Helper to post to Pantry with retry
- */
-async function postToPantry(pantryId: string, payload: CloudMenuPayload, retries = 1): Promise<boolean> {
-  const pantryUrl = `https://getpantry.cloud/apiv1/pantry/${pantryId}/basket/menu_database`;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const res = await fetch(pantryUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        return true;
-      }
-    } catch {
-      // ignore
-    }
-  }
-  return false;
-}
-
-/**
- * Saves entire menu or updates fields to Server Database & local cache & Pantry.cloud.
- */
-export async function saveMenuToCloud(payload: Partial<CloudMenuPayload>): Promise<CloudMenuPayload> {
-  const { pantryId } = getCustomStorageConfig();
-  const current = getLocalCachedMenu();
-
-  const updatedPayload: CloudMenuPayload = {
-    categories: payload.categories !== undefined ? payload.categories : (current?.categories || []),
-    items: payload.items !== undefined ? payload.items : (current?.items || []),
-    orderPhoneNumber: payload.orderPhoneNumber !== undefined ? payload.orderPhoneNumber : (current?.orderPhoneNumber || '09900674112'),
+  const result = await response.json();
+  return {
+    categories: result.categories || [],
+    items: result.items || [],
+    orderPhoneNumber: result.orderPhoneNumber || '09900674112',
     updatedAt: new Date().toISOString(),
   };
-
-  // 1. Update local cache immediately
-  setLocalCachedMenu(updatedPayload);
-
-  // 2. Save directly to Authoritative Server Database (/api/menu)
-  try {
-    await fetch('/api/menu', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updatedPayload),
-    });
-  } catch (e) {
-    console.warn('Direct server save note:', e);
-  }
-
-  // 3. Sync to Pantry Cloud in the background
-  if (pantryId) {
-    postToPantry(pantryId, updatedPayload).catch(() => {});
-  }
-
-  return updatedPayload;
 }
 
 /**
- * Delete a single item on the cloud server
+ * Delete a category and its cascade items directly on the server database
  */
-export async function deleteItemOnCloud(itemId: string): Promise<void> {
-  try {
-    await fetch(`/api/menu/items/${encodeURIComponent(itemId)}`, {
-      method: 'DELETE',
-    });
-  } catch (e) {
-    console.warn('Server item delete endpoint note:', e);
+export async function deleteCategoryOnCloud(categoryId: string): Promise<CloudMenuPayload> {
+  const response = await fetch(`/api/menu/categories/${encodeURIComponent(categoryId)}`, {
+    method: 'DELETE',
+    headers: {
+      'Accept': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`خطا در حذف دسته‌بندی از سرور (کد خطا: ${response.status})`);
   }
+
+  const result = await response.json();
+  return {
+    categories: result.categories || [],
+    items: result.items || [],
+    orderPhoneNumber: result.orderPhoneNumber || '09900674112',
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 /**
- * Delete a category and its cascading items on the cloud server
- */
-export async function deleteCategoryOnCloud(categoryId: string): Promise<void> {
-  try {
-    await fetch(`/api/menu/categories/${encodeURIComponent(categoryId)}`, {
-      method: 'DELETE',
-    });
-  } catch (e) {
-    console.warn('Server category delete endpoint note:', e);
-  }
-}
-
-/**
- * Resets the entire menu to default factory settings across cloud and local.
+ * Resets the entire menu to default factory settings directly on the server.
  */
 export async function resetMenuOnCloud(): Promise<CloudMenuPayload> {
-  const { pantryId } = getCustomStorageConfig();
+  const response = await fetch('/api/menu/reset', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+    },
+  });
 
-  const defaultData: CloudMenuPayload = {
-    categories: INITIAL_CATEGORIES,
-    items: INITIAL_MENU_ITEMS,
-    orderPhoneNumber: '09900674112',
-    updatedAt: new Date().toISOString(),
-  };
-
-  setLocalCachedMenu(defaultData);
-
-  const promises: Promise<any>[] = [];
-
-  if (pantryId) {
-    promises.push(postToPantry(pantryId, defaultData));
+  if (!response.ok) {
+    throw new Error(`خطا در بازنشانی دیتابیس روی سرور (کد خطا: ${response.status})`);
   }
 
-  promises.push(
-    fetch('/api/menu/reset', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .catch(() => {})
-  );
-
-  await Promise.allSettled(promises);
-  return defaultData;
+  const result = await response.json();
+  return {
+    categories: result.categories || [],
+    items: result.items || [],
+    orderPhoneNumber: result.orderPhoneNumber || '09900674112',
+    updatedAt: result.updatedAt || new Date().toISOString(),
+  };
 }
 
 /**
- * Subscribes to real-time updates via Server-Sent Events (SSE) stream or fallback.
+ * Subscribes to authoritative real-time updates directly via Server-Sent Events (SSE).
  */
 export function subscribeToCloudMenu(
   onUpdate: (data: CloudMenuPayload) => void,
@@ -323,7 +177,6 @@ export function subscribeToCloudMenu(
               orderPhoneNumber: typeof data.orderPhoneNumber === 'string' ? data.orderPhoneNumber : '09900674112',
               updatedAt: data.updatedAt,
             };
-            setLocalCachedMenu(payload);
             onUpdate(payload);
           }
         } catch (e) {
@@ -339,7 +192,7 @@ export function subscribeToCloudMenu(
         if (!isClosed) {
           retryTimer = setTimeout(() => {
             if (!isClosed) connectSSE();
-          }, 15000);
+          }, 8000);
         }
         if (onError) onError(err);
       };

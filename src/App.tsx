@@ -21,6 +21,7 @@ import { ItemDetailModal } from './components/ItemDetailModal';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
 import { ShareModal } from './components/ShareModal';
+import { InstallAppModal } from './components/InstallAppModal';
 import { MenuIcon } from './components/MenuIcon';
 import { toPersianDigits } from './utils/formatters';
 import { 
@@ -160,6 +161,7 @@ export default function App() {
   const [isAdminLoginOpen, setIsAdminLoginOpen] = useState(false);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
   const [editingItemInAdmin, setEditingItemInAdmin] = useState<MenuItem | null>(null);
 
   // Dynamic section refs for categories
@@ -462,6 +464,7 @@ export default function App() {
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           onShareMenu={handleShareMenu}
+          onInstallApp={() => setIsInstallModalOpen(true)}
           onOpenAdminLogin={() => setIsAdminLoginOpen(true)}
           isAdminLoggedIn={isAdminLoggedIn}
           onOpenAdminPanel={() => setIsAdminPanelOpen(true)}
@@ -698,10 +701,17 @@ export default function App() {
         initialEditingItem={editingItemInAdmin}
       />
 
-      {/* Share & Add to Home Screen Modal */}
+      {/* Share Modal */}
       <ShareModal
         isOpen={isShareModalOpen}
         onClose={() => setIsShareModalOpen(false)}
+        restaurantName="کافه رستوران نیک"
+      />
+
+      {/* Add to Home Screen Modal */}
+      <InstallAppModal
+        isOpen={isInstallModalOpen}
+        onClose={() => setIsInstallModalOpen(false)}
         restaurantName="کافه رستوران نیک"
       />
     </div>

@@ -2,10 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MenuItem, CategoryInfo } from '../types';
 import { MenuIcon } from './MenuIcon';
 import { formatPrice, toPersianDigits } from '../utils/formatters';
-import { 
-  getCustomStorageConfig, 
-  saveMenuToCloud
-} from '../lib/cloudMenuService';
+import { saveMenuToCloud } from '../lib/cloudMenuService';
 import { 
   X, 
   Plus, 
@@ -131,59 +128,28 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     setTimeout(() => setFeedbackNotice(null), 3500);
   };
 
-  const handleTestPantryConnection = async () => {
-    const { pantryId } = getCustomStorageConfig();
-    if (!pantryId) {
-      alert('شناسه دیتابیس در فایل کانفیگ یافت نشد.');
-      return;
-    }
+  const handleTestServerConnection = async () => {
     setPingStatus({ latency: null, status: 'testing' });
     const startTime = performance.now();
     try {
-      // 1. Try checking the Pantry account details (GET /apiv1/pantry/{pantry_id})
-      const pantryAccountUrl = `https://getpantry.cloud/apiv1/pantry/${pantryId}`;
-      const res = await fetch(pantryAccountUrl, {
+      const res = await fetch('/api/health', {
         method: 'GET',
+        cache: 'no-store',
         headers: { 'Accept': 'application/json' },
       });
       const endTime = performance.now();
       const ms = Math.round(endTime - startTime);
 
       if (res.ok) {
-        // ID is valid! Automatically seed/sync the basket so it's ready
-        await saveMenuToCloud({ categories, items, orderPhoneNumber });
         setPingStatus({ latency: ms, status: 'success' });
-        showNotice(`اتصال به دیتابیس Pantry با موفقیت تأیید شد (${toPersianDigits(ms)} میلی‌ثانیه). منو همگام است.`);
-        return;
-      }
-
-      // 2. If account details endpoint returned 400/404, check basket endpoint directly
-      const basketUrl = `https://getpantry.cloud/apiv1/pantry/${pantryId}/basket/menu_database`;
-      const basketRes = await fetch(basketUrl, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' },
-      });
-
-      if (basketRes.ok || basketRes.status === 400 || basketRes.status === 404) {
-        await saveMenuToCloud({ categories, items, orderPhoneNumber });
-        const endMs = Math.round(performance.now() - startTime);
-        setPingStatus({ latency: endMs, status: 'success' });
-        showNotice(`اتصال با دیتابیس ابری Pantry تأیید شد (${toPersianDigits(endMs)} میلی‌ثانیه)!`);
+        showNotice(`اتصال مستقیم به دیتابیس سرور برقرار است (${toPersianDigits(ms)} میلی‌ثانیه).`);
       } else {
         setPingStatus({ latency: null, status: 'error' });
-        showNotice(`پاسخ از سرور دریافت نشد (کد ${basketRes.status}).`);
+        showNotice(`خطا در پاسخگویی دیتابیس سرور (کد ${res.status}).`);
       }
     } catch {
-      // 3. Fallback write attempt
-      try {
-        await saveMenuToCloud({ categories, items, orderPhoneNumber });
-        const endMs = Math.round(performance.now() - startTime);
-        setPingStatus({ latency: endMs, status: 'success' });
-        showNotice(`اتصال با دیتابیس Pantry برقرار شد (${toPersianDigits(endMs)} میلی‌ثانیه)!`);
-      } catch {
-        setPingStatus({ latency: null, status: 'error' });
-        showNotice('خطا در اتصال به سرور Pantry. لطفاً اینترنت خود را بررسی کنید.');
-      }
+      setPingStatus({ latency: null, status: 'error' });
+      showNotice('خطا در برقراری ارتباط با دیتابیس سرور.');
     }
   };
 
@@ -1095,32 +1061,32 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 </div>
               </div>
 
-              {/* Pantry.cloud Real-time Database Configuration */}
+              {/* Server Database Configuration */}
               <div className="bg-[#14141d] border border-[#242433] rounded-2xl p-4 space-y-3.5">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-bold text-[#faf7ee] flex items-center gap-2">
-                    <Cloud className="w-4 h-4 text-[#70b5ff]" />
-                    <span>دیتابیس ابری سراسری (Pantry Cloud)</span>
+                    <Database className="w-4 h-4 text-[#70b5ff]" />
+                    <span>دیتابیس متمرکز سرور</span>
                   </h3>
                   <span className="px-2.5 py-1 rounded-full bg-[#172d1f] text-[#7ce075] border border-[#235332] text-[10px] font-bold flex items-center gap-1.5 shadow-sm">
                     <span className="w-2 h-2 rounded-full bg-[#7ce075] animate-pulse"></span>
-                    فعال و متصل سراسری
+                    فعال و متصل
                   </span>
                 </div>
 
                 <p className="text-xs text-[#a6a092] leading-relaxed">
-                  دیتابیس ابری برای تمام مشتریان، دستگاه‌ها و مرورگرها فعال است. تمام تغییرات (افزودن، ویرایش و حذف غذاها، دسته‌بندی‌ها و شماره تماس) به صورت آنی و خودکار روی سرور ابری همگام‌سازی می‌شوند.
+                  اطلاعات منو منحصراً و به صورت زنده از دیتابیس سرور دریافت و ثبت می‌شوند و هیچ‌گونه داده موقت روی مرورگر ذخیره نمی‌گردد. تمام تغییرات (افزودن، ویرایش و حذف غذاها و دسته‌بندی‌ها) به صورت مستقیم در سرور پایدار می‌شوند.
                 </p>
 
                 {/* Test Connection Button & Status */}
                 <div className="pt-2 border-t border-[#232332] flex flex-col sm:flex-row items-center justify-between gap-2.5">
                   <div className="text-xs text-[#8e897e] flex items-center gap-1.5">
                     <Database className="w-3.5 h-3.5 text-[#70b5ff]" />
-                    <span>وضعیت دیتابیس: <span className="text-[#7ce075] font-bold">همگام‌سازی زنده ابری فعال</span></span>
+                    <span>وضعیت دیتابیس: <span className="text-[#7ce075] font-bold">همگام‌سازی زنده فعال</span></span>
                   </div>
                   <button
                     type="button"
-                    onClick={handleTestPantryConnection}
+                    onClick={handleTestServerConnection}
                     disabled={pingStatus.status === 'testing'}
                     className="w-full sm:w-auto px-3.5 py-2 rounded-xl bg-[#1a2333] hover:bg-[#23324a] text-[#70b5ff] text-xs font-bold border border-[#2d4263] transition-colors flex items-center justify-center gap-1.5 disabled:opacity-40"
                   >
@@ -1130,7 +1096,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                         ? 'در حال سنجش اتصال...'
                         : pingStatus.latency !== null
                         ? `تست مجدد اتصال (${toPersianDigits(pingStatus.latency)} میلی‌ثانیه)`
-                        : 'تست برقراری ارتباط با دیتابیس'}
+                        : 'تست اتصال با دیتابیس سرور'}
                     </span>
                   </button>
                 </div>
