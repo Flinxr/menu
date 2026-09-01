@@ -145,26 +145,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
       setPingStatus({ latency: result.latency, status: 'success' });
       showNotice(`اتصال به پایگاه داده Pantry Cloud برقرار است (${toPersianDigits(result.latency)} میلی‌ثانیه - ${toPersianDigits(result.count)} آیتم).`);
     } catch {
-      // Fallback test to server health
-      try {
-        const startTime = performance.now();
-        const res = await fetch('/api/health', {
-          method: 'GET',
-          cache: 'no-store',
-          headers: { 'Accept': 'application/json' },
-        });
-        const ms = Math.round(performance.now() - startTime);
-        if (res.ok) {
-          setPingStatus({ latency: ms, status: 'success' });
-          showNotice(`اتصال سرور برقرار است (${toPersianDigits(ms)} میلی‌ثانیه).`);
-        } else {
-          setPingStatus({ latency: null, status: 'error' });
-          showNotice(`خطا در پاسخگویی سرور (کد ${res.status}).`);
-        }
-      } catch {
-        setPingStatus({ latency: null, status: 'error' });
-        showNotice('خطا در برقراری ارتباط با دیتابیس Pantry Cloud.');
-      }
+      setPingStatus({ latency: null, status: 'error' });
+      showNotice('خطا در برقراری ارتباط با دیتابیس Pantry Cloud. لطفاً اتصال اینترنت را بررسی کنید.');
     }
   };
 

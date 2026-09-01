@@ -9,8 +9,11 @@ import { CATEGORIES as INITIAL_CATEGORIES, MENU_ITEMS as INITIAL_MENU_ITEMS } fr
 import { 
   fetchMenuFromCloud, 
   saveMenuToCloud, 
-  resetMenuOnCloud,
-  subscribeToCloudMenu, 
+  saveItemToCloud, 
+  deleteItemOnCloud, 
+  saveCategoryToCloud, 
+  deleteCategoryOnCloud, 
+  resetMenuOnCloud, 
   CloudMenuPayload 
 } from './lib/cloudMenuService';
 import { Header } from './components/Header';
@@ -100,54 +103,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // Initial fetch on mount for all devices and IPs
+    // Initial fetch from Pantry Cloud / Local Cache
     refreshFromCloud(true);
 
-    // Subscribe to realtime updates
-    const unsubscribe = subscribeToCloudMenu(
-      (data: CloudMenuPayload) => {
-        if (data.categories && Array.isArray(data.categories)) {
-          setCategories(data.categories);
-        }
-        if (data.items && Array.isArray(data.items)) {
-          setMenuItems(data.items);
-        }
-        if (data.orderPhoneNumber) {
-          setOrderPhoneNumber(data.orderPhoneNumber);
-        }
-        setIsLoading(false);
-      },
-      (error) => {
-        console.warn('Realtime listener fallback note:', error);
-      }
-    );
-
-    // Refresh on window focus / visibility change with debounce
+    // Occasional refresh on window focus with minimum 45s debounce to respect Pantry rate limits
     let lastRefreshTime = Date.now();
     const handleFocus = () => {
       const now = Date.now();
-      if (now - lastRefreshTime > 20000) {
+      if (now - lastRefreshTime > 45000) {
         lastRefreshTime = now;
         refreshFromCloud(false);
       }
     };
 
     window.addEventListener('focus', handleFocus);
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        const now = Date.now();
-        if (now - lastRefreshTime > 20000) {
-          lastRefreshTime = now;
-          refreshFromCloud(false);
-        }
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-
     return () => {
-      unsubscribe();
       window.removeEventListener('focus', handleFocus);
-      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [refreshFromCloud]);
 
@@ -217,11 +188,11 @@ export default function App() {
     }
     setIsSyncing(true);
     try {
-      await saveMenuToCloud({
-        categories: categoriesRef.current,
-        items: nextItems,
-        orderPhoneNumber: orderPhoneRef.current,
-      });
+      const updated = await saveItemToCloud(item, isNew);
+      if (Array.isArray(updated) && updated.length > 0) {
+        setMenuItems(updated);
+        menuItemsRef.current = updated;
+      }
       showToast(isNew ? `غذای «${item.name}» افزوده و در دیتابیس ذخیره شد` : `مشخصات «${item.name}» در دیتابیس ذخیره شد`);
     } catch (err) {
       console.error('Error saving item to database:', err);
@@ -241,11 +212,11 @@ export default function App() {
     }
     setIsSyncing(true);
     try {
-      await saveMenuToCloud({
-        categories: categoriesRef.current,
-        items: nextItems,
-        orderPhoneNumber: orderPhoneRef.current,
-      });
+      const updated = await deleteItemOnCloud(itemId);
+      if (Array.isArray(updated)) {
+        setMenuItems(updated);
+        menuItemsRef.current = updated;
+      }
       showToast(`آیتم «${itemName}» از دیتابیس به صورت کامل حذف شد`);
     } catch (err) {
       console.error('Error deleting item from database:', err);
@@ -267,11 +238,11 @@ export default function App() {
     categoriesRef.current = nextCategories;
     setIsSyncing(true);
     try {
-      await saveMenuToCloud({
-        categories: nextCategories,
-        items: menuItemsRef.current,
-        orderPhoneNumber: orderPhoneRef.current,
-      });
+      const updated = await saveCategoryToCloud(category, isNew);
+      if (Array.isArray(updated)) {
+        setCategories(updated);
+        categoriesRef.current = updated;
+      }
       showToast(isNew ? `دسته‌بندی «${category.title}» ذخیره شد` : `مشخصات دسته‌بندی «${category.title}» ذخیره شد`);
     } catch (err) {
       console.error('Error saving category to database:', err);
@@ -294,11 +265,15 @@ export default function App() {
     }
     setIsSyncing(true);
     try {
-      await saveMenuToCloud({
-        categories: nextCategories,
-        items: nextItems,
-        orderPhoneNumber: orderPhoneRef.current,
-      });
+      const result = await deleteCategoryOnCloud(catId);
+      if (result && Array.isArray(result.categories)) {
+        setCategories(result.categories);
+        categoriesRef.current = result.categories;
+      }
+      if (result && Array.isArray(result.items)) {
+        setMenuItems(result.items);
+        menuItemsRef.current = result.items;
+      }
       showToast(`دسته‌بندی «${catTitle}» و تمام غذاهای آن از دیتابیس حذف شدند`);
     } catch (err) {
       console.error('Error deleting category from database:', err);
